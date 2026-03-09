@@ -1,38 +1,8 @@
 {
   "version": 1,
-  "author": "Corentin Domken (et Copilot)",
+  "author": "Anonymous maker",
   "editor": "wokwi",
-  "parts": [
-    {
-      "type": "wokwi-arduino-mega",
-      "id": "mega",
-      "top": -177.58,
-      "left": 252.33,
-      "rotate": 90,
-      "attrs": {}
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led1",
-      "top": -106.4,
-      "left": 587,
-      "rotate": 270,
-      "attrs": { "color": "red" }
-    },
-    {
-      "type": "wokwi-pushbutton",
-      "id": "btn1",
-      "top": -239.9,
-      "left": 601.5,
-      "rotate": 270,
-      "attrs": { "color": "green", "xray": "1" }
-    }
-  ],
-  "connections": [
-    [ "led1:A", "mega:13", "red", [ "v0" ] ],
-    [ "btn1:1.l", "mega:GND.1", "black", [ "v0" ] ],
-    [ "btn1:2.l", "mega:2", "green", [ "v0" ] ],
-    [ "mega:GND.1", "led1:C", "black", [ "h100.27", "v2.98" ] ]
-  ],
+  "parts": [ { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": -4.76, "attrs": {} } ],
+  "connections": [ [ "esp:TX", "$serialMonitor:RX", "", [] ], [ "esp:RX", "$serialMonitor:TX", "", [] ] ],
   "dependencies": {}
 }
