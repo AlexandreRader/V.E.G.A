@@ -1,2 +1,6 @@
 .pio
 .vscode/*
+# Fichiers Python temporaires
+__pycache__/
+*.pyc
+station_sol/images/*_temp.jpg
