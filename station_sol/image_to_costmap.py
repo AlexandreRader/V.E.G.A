@@ -11,102 +11,124 @@ MAP_HEIGHT_M = 6.0
 CELL_SIZE_CM = 10.0 
 
 # --- CONFIGURATION TRAITEMENT ---
-ROBOT_WIDTH_CM = 30.0 # Largeur de votre rover (Zone Mortelle 255)
-SAFE_MARGIN_CM = 40.0 # Distance supplémentaire du dégradé (Aura bleue/violette)
+ROBOT_WIDTH_CM = 30.0 
+SAFE_MARGIN_CM = 40.0 
 
 # --- CALCULS CONSTANTS ---
-GRID_W = int((MAP_WIDTH_M * 100) / CELL_SIZE_CM)  # 40 cases
-GRID_H = int((MAP_HEIGHT_M * 100) / CELL_SIZE_CM) # 60 cases
+GRID_W = int((MAP_WIDTH_M * 100) / CELL_SIZE_CM)  
+GRID_H = int((MAP_HEIGHT_M * 100) / CELL_SIZE_CM) 
 SCALE_UI = 10 
 
 class CostmapApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Station Sol - Éditeur de Mission VEGA SC317")
-        self.root.geometry("1300x850") 
+        self.root.title("Station Sol - Éditeur de Mission VEGA SC317 (Détection de Contours + Overlay)")
+        self.root.geometry("1350x850") 
         
         self.original_img = None
         self.warped_img = None
-        self.costmap_grid = None # Matrice 0 à 255
+        self.costmap_grid = None 
         
-        # Données de mission & couleurs
         self.points_source = [] 
         self.canvas_points = [] 
         self.start_pos = None 
         self.end_pos = None   
         
-        self.color_free_bgr = None # Couleur du sol (Pipette)
-        self.color_obs_bgr = None  # Couleur de l'obstacle (Pipette)
-        
         self.photo_orig = None
         self.photo_cost = None
         
-        # Outils UI
-        self.left_tool_mode = tk.StringVar(value="perspective")
+        # --- Variables Outils ---
         self.right_tool_mode = tk.StringVar(value="none")
-        self.brush_size = tk.IntVar(value=1)
+        self.brush_size = tk.IntVar(value=3)
+        self.brush_cost = tk.IntVar(value=255) 
+        
+        # NOUVEAU : Transparence de l'overlay (100 = Costmap seule, 0 = Image réelle seule)
+        self.overlay_alpha = tk.IntVar(value=70) 
+        
+        # Variables Canny & Contours
+        self.canny_low = tk.IntVar(value=50)
+        self.canny_high = tk.IntVar(value=150)
+        self.min_area = tk.IntVar(value=500) 
         
         self.setup_ui()
 
     def setup_ui(self):
-        # 1. BARRE DU HAUT
         btn_frame = tk.Frame(self.root, bg="#f0f0f0")
         btn_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
         btn_style = {"font": ("Arial", 10, "bold"), "fg": "white", "padx": 10, "pady": 5}
 
         tk.Button(btn_frame, text="1. Charger l'image", command=self.load_image, bg="#4CAF50", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="2. Redresser (Perspective)", command=self.correct_perspective, bg="#9C27B0", **btn_style).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="3. Générer Costmap B/R", command=self.process_image, bg="#2196F3", **btn_style).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="3. Générer Costmap (Contours)", command=self.process_image, bg="#2196F3", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="4. Exporter Mission C++", command=self.export_code, bg="#FF9800", **btn_style).pack(side=tk.RIGHT, padx=20)
         
-        # 2. ZONE DES CANVASES
         self.canvas_frame = tk.Frame(self.root)
         self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=20)
         
-        # --- GAUCHE : Caméra & Pipettes ---
+        # --- GAUCHE : Caméra & Outils Canny ---
         orig_frame = tk.Frame(self.canvas_frame)
         orig_frame.pack(side=tk.LEFT, padx=10)
-        tk.Label(orig_frame, text="Caméra Originale", font=("Arial", 11, "bold")).pack()
+        tk.Label(orig_frame, text="Caméra Originale (Cliquez les 4 coins)", font=("Arial", 11, "bold")).pack()
         
         self.canvas_orig = tk.Canvas(orig_frame, width=500, height=500, bg="#ddd", borderwidth=2, relief="groove", cursor="crosshair")
         self.canvas_orig.pack()
         self.canvas_orig.bind("<Button-1>", self.on_canvas_orig_click)
 
-        # Barre d'outils Gauche
+        # Barre de réglages de la Détection de Contours
         left_toolbar = tk.Frame(orig_frame, pady=5)
         left_toolbar.pack(fill=tk.X)
-        tk.Radiobutton(left_toolbar, text="📍 4 Coins", variable=self.left_tool_mode, value="perspective").pack(side=tk.LEFT)
-        tk.Button(left_toolbar, text="🔄", command=self.reset_points, font=("Arial", 8)).pack(side=tk.LEFT, padx=5)
+        tk.Button(left_toolbar, text="🔄 Effacer Cadre", command=self.reset_points, font=("Arial", 9)).pack(side=tk.LEFT, padx=5)
         
-        tk.Radiobutton(left_toolbar, text="🖌️ Couleur Sol", variable=self.left_tool_mode, value="c_free").pack(side=tk.LEFT, padx=5)
-        self.lbl_c_free = tk.Label(left_toolbar, text="██", fg="#d3d3d3", font=("Arial", 12))
-        self.lbl_c_free.pack(side=tk.LEFT)
+        param_frame = tk.Frame(orig_frame, pady=5, bd=1, relief="ridge")
+        param_frame.pack(fill=tk.X, pady=5)
+        tk.Label(param_frame, text="⚙️ Réglages Détection (Canny) :", font=("Arial", 9, "bold")).pack(anchor="w", padx=5)
         
-        tk.Radiobutton(left_toolbar, text="🖌️ Couleur Obstacle", variable=self.left_tool_mode, value="c_obs").pack(side=tk.LEFT, padx=5)
-        self.lbl_c_obs = tk.Label(left_toolbar, text="██", fg="#d3d3d3", font=("Arial", 12))
-        self.lbl_c_obs.pack(side=tk.LEFT)
+        row1 = tk.Frame(param_frame)
+        row1.pack(fill=tk.X, padx=5)
+        tk.Label(row1, text="Sensibilité (Bas):", width=15, anchor="e").pack(side=tk.LEFT)
+        tk.Scale(row1, from_=0, to=255, orient=tk.HORIZONTAL, variable=self.canny_low, showvalue=1).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        row2 = tk.Frame(param_frame)
+        row2.pack(fill=tk.X, padx=5)
+        tk.Label(row2, text="Contraste (Haut):", width=15, anchor="e").pack(side=tk.LEFT)
+        tk.Scale(row2, from_=0, to=255, orient=tk.HORIZONTAL, variable=self.canny_high, showvalue=1).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        row3 = tk.Frame(param_frame)
+        row3.pack(fill=tk.X, padx=5)
+        tk.Label(row3, text="Filtre Poussière:", width=15, anchor="e").pack(side=tk.LEFT)
+        tk.Scale(row3, from_=10, to=5000, orient=tk.HORIZONTAL, variable=self.min_area, showvalue=1, resolution=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # --- DROITE : Costmap & Éditeur ---
         cost_frame = tk.Frame(self.canvas_frame)
         cost_frame.pack(side=tk.LEFT, padx=20)
-        tk.Label(cost_frame, text=f"Costmap (0=Bleu, 255=Rouge)", font=("Arial", 11, "bold")).pack()
+        tk.Label(cost_frame, text=f"Costmap avec Overlay ({GRID_W}x{GRID_H} cases)", font=("Arial", 11, "bold")).pack()
         
         self.canvas_cost = tk.Canvas(cost_frame, width=GRID_W*SCALE_UI, height=GRID_H*SCALE_UI, bg="black", borderwidth=2, relief="groove", cursor="target")
         self.canvas_cost.pack()
         self.canvas_cost.bind("<Button-1>", self.on_costmap_mouse)
         self.canvas_cost.bind("<B1-Motion>", self.on_costmap_mouse)
 
-        # Barre d'outils Droite
         right_toolbar = tk.Frame(cost_frame, pady=5)
         right_toolbar.pack(fill=tk.X)
         
         tk.Radiobutton(right_toolbar, text="Sélection", variable=self.right_tool_mode, value="none").pack(side=tk.LEFT)
-        tk.Radiobutton(right_toolbar, text="Mur (+)", variable=self.right_tool_mode, value="add", fg="red").pack(side=tk.LEFT)
-        tk.Radiobutton(right_toolbar, text="Sol (-)", variable=self.right_tool_mode, value="erase", fg="blue").pack(side=tk.LEFT)
-        tk.Scale(right_toolbar, from_=1, to=5, orient=tk.HORIZONTAL, variable=self.brush_size, length=60, showvalue=0).pack(side=tk.LEFT)
+        tk.Radiobutton(right_toolbar, text="🖌️ Édition", variable=self.right_tool_mode, value="brush", font=("Arial", 9, "bold")).pack(side=tk.LEFT)
         
-        tk.Radiobutton(right_toolbar, text="🟢 A", variable=self.right_tool_mode, value="start", fg="green").pack(side=tk.LEFT, padx=10)
-        tk.Radiobutton(right_toolbar, text="🔴 B", variable=self.right_tool_mode, value="end", fg="red").pack(side=tk.LEFT)
+        tk.Label(right_toolbar, text="| Taille:").pack(side=tk.LEFT)
+        tk.Scale(right_toolbar, from_=1, to=10, orient=tk.HORIZONTAL, variable=self.brush_size, length=50, showvalue=0).pack(side=tk.LEFT)
+        
+        tk.Label(right_toolbar, text=" Intensité:").pack(side=tk.LEFT)
+        tk.Scale(right_toolbar, from_=0, to=255, orient=tk.HORIZONTAL, variable=self.brush_cost, length=70, tickinterval=255).pack(side=tk.LEFT)
+        
+        bottom_right = tk.Frame(cost_frame, pady=5)
+        bottom_right.pack(fill=tk.X)
+        tk.Radiobutton(bottom_right, text="🟢 A", variable=self.right_tool_mode, value="start", fg="green").pack(side=tk.LEFT, padx=5)
+        tk.Radiobutton(bottom_right, text="🔴 B", variable=self.right_tool_mode, value="end", fg="red").pack(side=tk.LEFT)
+        
+        # NOUVEAU : Le curseur d'Overlay (Opacité)
+        tk.Label(bottom_right, text="  |  Transparence Costmap :").pack(side=tk.LEFT, padx=(10, 0))
+        # command=lambda v: ... permet d'appeler la fonction de mise à jour dès qu'on bouge le slider !
+        tk.Scale(bottom_right, from_=0, to=100, orient=tk.HORIZONTAL, variable=self.overlay_alpha, length=120, showvalue=0, command=lambda v: self.update_costmap_canvas()).pack(side=tk.LEFT)
 
         self.lbl_status = tk.Label(self.root, text="Statut : Prêt.", font=("Arial", 9), fg="#777")
         self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
@@ -147,31 +169,16 @@ class CostmapApp:
 
         real_x = int((event.x - offset_x) / scale)
         real_y = int((event.y - offset_y) / scale)
-        
-        mode = self.left_tool_mode.get()
 
-        if mode == "perspective":
-            if len(self.points_source) < 4:
-                self.points_source.append([real_x, real_y])
-                self.canvas_points.append((event.x, event.y))
-                r = 4
-                self.canvas_orig.create_oval(event.x-r, event.y-r, event.x+r, event.y+r, fill="yellow", outline="black")
-                if len(self.canvas_points) > 1:
-                    self.canvas_orig.create_line(self.canvas_points[-2][0], self.canvas_points[-2][1], event.x, event.y, fill="yellow", dash=(4,2))
-                if len(self.canvas_points) == 4:
-                    self.canvas_orig.create_line(event.x, event.y, self.canvas_points[0][0], self.canvas_points[0][1], fill="yellow", dash=(4,2))
-                    
-        elif mode == "c_free":
-            self.color_free_bgr = self.original_img[real_y, real_x]
-            b, g, r = self.color_free_bgr
-            self.lbl_c_free.config(fg=f"#{r:02x}{g:02x}{b:02x}")
-            self.lbl_status.config(text="Couleur du SOL enregistrée.")
-            
-        elif mode == "c_obs":
-            self.color_obs_bgr = self.original_img[real_y, real_x]
-            b, g, r = self.color_obs_bgr
-            self.lbl_c_obs.config(fg=f"#{r:02x}{g:02x}{b:02x}")
-            self.lbl_status.config(text="Couleur de l'OBSTACLE enregistrée.")
+        if len(self.points_source) < 4:
+            self.points_source.append([real_x, real_y])
+            self.canvas_points.append((event.x, event.y))
+            r = 4
+            self.canvas_orig.create_oval(event.x-r, event.y-r, event.x+r, event.y+r, fill="yellow", outline="black")
+            if len(self.canvas_points) > 1:
+                self.canvas_orig.create_line(self.canvas_points[-2][0], self.canvas_points[-2][1], event.x, event.y, fill="yellow", dash=(4,2))
+            if len(self.canvas_points) == 4:
+                self.canvas_orig.create_line(event.x, event.y, self.canvas_points[0][0], self.canvas_points[0][1], fill="yellow", dash=(4,2))
 
     def order_points(self, pts):
         rect = np.zeros((4, 2), dtype="float32")
@@ -198,35 +205,38 @@ class CostmapApp:
         self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB))) 
         self.canvas_orig.delete("all")
         self.canvas_orig.create_image(250, 250, image=self.photo_orig, anchor=tk.CENTER)
-        self.lbl_status.config(text="Image redressée ! Utilisez les pipettes pour sélectionner les couleurs.")
+        self.lbl_status.config(text="Image redressée ! Cliquez sur Générer Costmap (Ajustez les curseurs si besoin).")
 
     def process_image(self):
         if self.warped_img is None: 
             messagebox.showerror("Erreur", "Redressez l'image d'abord.")
             return
             
-        if self.color_free_bgr is None or self.color_obs_bgr is None:
-            messagebox.showerror("Erreur", "Utilisez les pipettes pour sélectionner la couleur du sol ET de l'obstacle.")
-            return
-            
-        # 1. Conversion de l'image et des couleurs en LAB (Luminance, A, B)
-        # C'est beaucoup plus robuste aux ombres et aux reflets que le RGB !
-        warped_lab = cv2.cvtColor(self.warped_img, cv2.COLOR_BGR2Lab).astype(np.float32)
-        c_free_lab = cv2.cvtColor(np.uint8([[self.color_free_bgr]]), cv2.COLOR_BGR2Lab)[0][0].astype(np.float32)
-        c_obs_lab = cv2.cvtColor(np.uint8([[self.color_obs_bgr]]), cv2.COLOR_BGR2Lab)[0][0].astype(np.float32)
-
-        # 2. Calcul de la distance colorimétrique de chaque pixel
-        dist_free = np.linalg.norm(warped_lab - c_free_lab, axis=2)
-        dist_obs = np.linalg.norm(warped_lab - c_obs_lab, axis=2)
-
-        # 3. Création du masque Binaire : Si c'est plus proche de l'obstacle, c'est 255
-        binary = np.where(dist_obs < dist_free, 255, 0).astype(np.uint8)
+        gray = cv2.cvtColor(self.warped_img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
         
-        # 4. Redimensionnement à la grille ESP32
-        small_binary = cv2.resize(binary, (GRID_W, GRID_H), interpolation=cv2.INTER_NEAREST)
+        low_thresh = self.canny_low.get()
+        high_thresh = self.canny_high.get()
+        edges = cv2.Canny(blurred, low_thresh, high_thresh)
         
-        # 5. Distance Transform (Gradient d'inflation)
-        free_space = cv2.bitwise_not(small_binary)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        
+        contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        binary_obstacles = np.zeros_like(gray)
+        min_a = self.min_area.get()
+        
+        obstacles_found = 0
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area > min_a:
+                cv2.drawContours(binary_obstacles, [cnt], -1, 255, thickness=cv2.FILLED)
+                obstacles_found += 1
+        
+        small_binary = cv2.resize(binary_obstacles, (GRID_W, GRID_H), interpolation=cv2.INTER_NEAREST)
+        
+        free_space = cv2.bitwise_not(small_binary) 
         dist = cv2.distanceTransform(free_space, cv2.DIST_L2, 3)
         
         self.costmap_grid = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
@@ -241,43 +251,51 @@ class CostmapApp:
                     self.costmap_grid[y, x] = 255 
                 elif d < max_dist_cells:
                     fraction = (d - robot_radius_cells) / safe_margin_cells
-                    self.costmap_grid[y, x] = int(254 * (1.0 - fraction))
+                    self.costmap_grid[y, x] = int(254 * (1.0 - fraction)) 
                 else:
                     self.costmap_grid[y, x] = 0 
         
         self.start_pos = None
         self.end_pos = None
         self.update_costmap_canvas()
-        self.lbl_status.configure(text="Costmap Bleu/Rouge générée par détection de couleurs !")
+        self.lbl_status.configure(text=f"Succès ! L'algorithme a trouvé et détouré {obstacles_found} obstacles majeurs.")
 
     def update_costmap_canvas(self):
         if self.costmap_grid is None: return
         
-        # --- CRÉATION DU DÉGRADÉ BLEU -> ROUGE PUR ---
-        # Agrandissement pour l'interface
+        # 1. On prépare la grille de couleurs (Bleu -> Rouge)
         disp_grid_large = cv2.resize(self.costmap_grid, (GRID_W*SCALE_UI, GRID_H*SCALE_UI), interpolation=cv2.INTER_NEAREST)
         
-        # Image RGB vide
         heatmap_rgb = np.zeros((GRID_H*SCALE_UI, GRID_W*SCALE_UI, 3), dtype=np.uint8)
-        # Canal ROUGE : augmente avec le coût
-        heatmap_rgb[:, :, 0] = disp_grid_large
-        # Canal VERT : toujours 0 (pour éviter le jaune/cyan)
+        heatmap_rgb[:, :, 0] = disp_grid_large       
         heatmap_rgb[:, :, 1] = 0
-        # Canal BLEU : inverse du coût (max quand c'est libre)
-        heatmap_rgb[:, :, 2] = 255 - disp_grid_large
+        heatmap_rgb[:, :, 2] = 255 - disp_grid_large 
         
-        img_pil = Image.fromarray(heatmap_rgb)
+        # --- NOUVEAU : LA FUSION ALPHA (OVERLAY) ---
+        alpha = self.overlay_alpha.get() / 100.0 # Curseur de 0 à 100 divisé par 100
+        
+        # Si on n'est pas à 100% de Costmap ET qu'on a bien l'image de fond
+        if alpha < 1.0 and self.warped_img is not None:
+            # On redimensionne l'image de la vraie piste à la taille de l'UI (400x600)
+            warped_rgb = cv2.cvtColor(self.warped_img, cv2.COLOR_BGR2RGB)
+            warped_resized = cv2.resize(warped_rgb, (GRID_W*SCALE_UI, GRID_H*SCALE_UI), interpolation=cv2.INTER_AREA)
+            
+            # La fonction magique qui mélange les deux images (Heatmap * Alpha + Fond * (1-Alpha))
+            final_img = cv2.addWeighted(heatmap_rgb, alpha, warped_resized, 1.0 - alpha, 0)
+        else:
+            final_img = heatmap_rgb
+            
+        img_pil = Image.fromarray(final_img)
         self.photo_cost = ImageTk.PhotoImage(img_pil)
         self.canvas_cost.delete("all")
         self.canvas_cost.create_image(0, 0, image=self.photo_cost, anchor=tk.NW)
         
-        # Dessiner le point de DEPART (Vert fluo)
+        # Dessins UI par-dessus (Les A et B restent toujours bien visibles !)
         if self.start_pos:
             cx, cy = self.start_pos[0] * SCALE_UI + (SCALE_UI//2), self.start_pos[1] * SCALE_UI + (SCALE_UI//2)
             self.canvas_cost.create_oval(cx-6, cy-6, cx+6, cy+6, fill="#00FF00", outline="white", width=2)
             self.canvas_cost.create_text(cx, cy-12, text="A", fill="#00FF00", font=("Arial", 10, "bold"))
 
-        # Dessiner le point d'ARRIVEE (Blanc pour contraster)
         if self.end_pos:
             cx, cy = self.end_pos[0] * SCALE_UI + (SCALE_UI//2), self.end_pos[1] * SCALE_UI + (SCALE_UI//2)
             self.canvas_cost.create_oval(cx-6, cy-6, cx+6, cy+6, fill="#FFFFFF", outline="black", width=2)
@@ -293,23 +311,25 @@ class CostmapApp:
 
         if mode == "start" and event.type == tk.EventType.ButtonPress: 
             if self.costmap_grid[gy, gx] == 255:
-                messagebox.showwarning("Attention", "Impossible de démarrer dans un mur (Rouge 255) !")
+                messagebox.showwarning("Attention", "Impossible de démarrer dans un mur ! (Cost=255)")
                 return
             self.start_pos = (gx, gy)
             self.update_costmap_canvas()
             
         elif mode == "end" and event.type == tk.EventType.ButtonPress: 
             if self.costmap_grid[gy, gx] == 255:
-                messagebox.showwarning("Attention", "Impossible d'arriver dans un mur (Rouge 255) !")
+                messagebox.showwarning("Attention", "Impossible d'arriver dans un mur ! (Cost=255)")
                 return
             self.end_pos = (gx, gy)
             self.update_costmap_canvas()
             
-        elif mode in ["add", "erase"]: 
-            val = 255 if mode == "add" else 0
+        elif mode == "brush": 
+            val = self.brush_cost.get() 
             radius = self.brush_size.get() - 1 
+            
             y_min, y_max = max(0, gy - radius), min(GRID_H, gy + radius + 1)
             x_min, x_max = max(0, gx - radius), min(GRID_W, gx + radius + 1)
+            
             self.costmap_grid[y_min:y_max, x_min:x_max] = val
             self.update_costmap_canvas()
 
@@ -325,7 +345,7 @@ class CostmapApp:
         ex, ey = self.end_pos if self.end_pos else (-1, -1)
 
         cpp_code = f"// ==========================================\n"
-        cpp_code += f"// MISSION VEGA SC317 - COSTMAP 0-255\n"
+        cpp_code += f"// MISSION VEGA SC317 - COSTMAP CANNY CONTOURS\n"
         cpp_code += f"// Dimensions réelles: {MAP_WIDTH_M}m de large x {MAP_HEIGHT_M}m de long\n"
         cpp_code += f"// 1 case = {CELL_SIZE_CM}x{CELL_SIZE_CM} cm\n"
         cpp_code += f"// ==========================================\n\n"
@@ -348,7 +368,7 @@ class CostmapApp:
         with open(export_path, "w") as f:
             f.write(cpp_code)
             
-        messagebox.showinfo("Export Réussi", f"Fichier sauvegardé !\n{export_path}")
+        messagebox.showinfo("Export Réussi", f"Fichier sauvegardé avec la Costmap Canny dans :\n{export_path}")
 
 if __name__ == "__main__":
     root = tk.Tk()
