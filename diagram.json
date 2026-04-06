@@ -1,12 +1,72 @@
 {
   "version": 1,
-  "author": "Equipe VEGA",
+  "author": "VEGA SC317",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0, "attrs": {} }
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    
+    { "type": "wokwi-slide-switch", "id": "ir_sensor", "top": 250, "left": -100, "attrs": { "bounce": "1" } },
+    { "type": "board-ssd1306", "id": "oled", "top": 230, "left": 100, "attrs": {} },
+
+    { "type": "wokwi-a4988", "id": "drv_m1", "top": -200, "left": -300, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "m1", "top": -200, "left": -450, "attrs": {} },
+    { "type": "wokwi-a4988", "id": "drv_m2", "top": -50, "left": -300, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "m2", "top": -50, "left": -450, "attrs": {} },
+    { "type": "wokwi-a4988", "id": "drv_m3", "top": 100, "left": -300, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "m3", "top": 100, "left": -450, "attrs": {} },
+
+    { "type": "wokwi-a4988", "id": "drv_m4", "top": -200, "left": 300, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "m4", "top": -200, "left": 450, "attrs": {} },
+    { "type": "wokwi-a4988", "id": "drv_m5", "top": -50, "left": 300, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "m5", "top": -50, "left": 450, "attrs": {} },
+    { "type": "wokwi-a4988", "id": "drv_m6", "top": 100, "left": 300, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "m6", "top": 100, "left": 450, "attrs": {} }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
-    [ "esp:RX", "$serialMonitor:TX", "", [] ]
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "esp:GND", "ir_sensor:1", "black", [] ],
+    [ "esp:21", "ir_sensor:2", "green", [] ],
+
+    [ "esp:GND", "oled:GND", "black", [] ],
+    [ "esp:3V3", "oled:VCC", "red", [] ],
+    [ "esp:4", "oled:SDA", "blue", [] ],
+    [ "esp:5", "oled:SCL", "yellow", [] ],
+
+    [ "esp:15", "drv_m1:STEP", "green", [] ], [ "esp:16", "drv_m1:DIR", "blue", [] ],
+    [ "esp:17", "drv_m2:STEP", "green", [] ], [ "esp:18", "drv_m2:DIR", "blue", [] ],
+    [ "esp:42", "drv_m3:STEP", "green", [] ], [ "esp:41", "drv_m3:DIR", "blue", [] ],
+    [ "esp:40", "drv_m4:STEP", "green", [] ], [ "esp:39", "drv_m4:DIR", "blue", [] ],
+    [ "esp:38", "drv_m5:STEP", "green", [] ], [ "esp:37", "drv_m5:DIR", "blue", [] ],
+    [ "esp:36", "drv_m6:STEP", "green", [] ], [ "esp:35", "drv_m6:DIR", "blue", [] ],
+
+    [ "esp:14", "drv_m1:ENABLE", "yellow", [] ],
+    [ "esp:14", "drv_m2:ENABLE", "yellow", [] ],
+    [ "esp:14", "drv_m3:ENABLE", "yellow", [] ],
+    [ "esp:14", "drv_m4:ENABLE", "yellow", [] ],
+    [ "esp:14", "drv_m5:ENABLE", "yellow", [] ],
+    [ "esp:14", "drv_m6:ENABLE", "yellow", [] ],
+
+    [ "drv_m1:RESET", "drv_m1:SLEEP", "purple", [] ],
+    [ "drv_m2:RESET", "drv_m2:SLEEP", "purple", [] ],
+    [ "drv_m3:RESET", "drv_m3:SLEEP", "purple", [] ],
+    [ "drv_m4:RESET", "drv_m4:SLEEP", "purple", [] ],
+    [ "drv_m5:RESET", "drv_m5:SLEEP", "purple", [] ],
+    [ "drv_m6:RESET", "drv_m6:SLEEP", "purple", [] ],
+
+    [ "drv_m1:2B", "m1:B-", "black", [] ], [ "drv_m1:2A", "m1:B+", "black", [] ], [ "drv_m1:1A", "m1:A+", "black", [] ], [ "drv_m1:1B", "m1:A-", "black", [] ],
+    [ "drv_m2:2B", "m2:B-", "black", [] ], [ "drv_m2:2A", "m2:B+", "black", [] ], [ "drv_m2:1A", "m2:A+", "black", [] ], [ "drv_m2:1B", "m2:A-", "black", [] ],
+    [ "drv_m3:2B", "m3:B-", "black", [] ], [ "drv_m3:2A", "m3:B+", "black", [] ], [ "drv_m3:1A", "m3:A+", "black", [] ], [ "drv_m3:1B", "m3:A-", "black", [] ],
+    [ "drv_m4:2B", "m4:B-", "black", [] ], [ "drv_m4:2A", "m4:B+", "black", [] ], [ "drv_m4:1A", "m4:A+", "black", [] ], [ "drv_m4:1B", "m4:A-", "black", [] ],
+    [ "drv_m5:2B", "m5:B-", "black", [] ], [ "drv_m5:2A", "m5:B+", "black", [] ], [ "drv_m5:1A", "m5:A+", "black", [] ], [ "drv_m5:1B", "m5:A-", "black", [] ],
+    [ "drv_m6:2B", "m6:B-", "black", [] ], [ "drv_m6:2A", "m6:B+", "black", [] ], [ "drv_m6:1A", "m6:A+", "black", [] ], [ "drv_m6:1B", "m6:A-", "black", [] ],
+
+    [ "esp:5V", "drv_m1:VMOT", "red", [] ], [ "esp:GND", "drv_m1:GND.2", "black", [] ], [ "esp:3V3", "drv_m1:VDD", "red", [] ], [ "esp:GND", "drv_m1:GND.1", "black", [] ],
+    [ "esp:5V", "drv_m2:VMOT", "red", [] ], [ "esp:GND", "drv_m2:GND.2", "black", [] ], [ "esp:3V3", "drv_m2:VDD", "red", [] ], [ "esp:GND", "drv_m2:GND.1", "black", [] ],
+    [ "esp:5V", "drv_m3:VMOT", "red", [] ], [ "esp:GND", "drv_m3:GND.2", "black", [] ], [ "esp:3V3", "drv_m3:VDD", "red", [] ], [ "esp:GND", "drv_m3:GND.1", "black", [] ],
+    [ "esp:5V", "drv_m4:VMOT", "red", [] ], [ "esp:GND", "drv_m4:GND.2", "black", [] ], [ "esp:3V3", "drv_m4:VDD", "red", [] ], [ "esp:GND", "drv_m4:GND.1", "black", [] ],
+    [ "esp:5V", "drv_m5:VMOT", "red", [] ], [ "esp:GND", "drv_m5:GND.2", "black", [] ], [ "esp:3V3", "drv_m5:VDD", "red", [] ], [ "esp:GND", "drv_m5:GND.1", "black", [] ],
+    [ "esp:5V", "drv_m6:VMOT", "red", [] ], [ "esp:GND", "drv_m6:GND.2", "black", [] ], [ "esp:3V3", "drv_m6:VDD", "red", [] ], [ "esp:GND", "drv_m6:GND.1", "black", [] ]
   ]
 }
