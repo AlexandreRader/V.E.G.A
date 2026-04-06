@@ -359,31 +359,62 @@ class CostmapApp:
             self.current_path = [] # Reset chemin si on modifie la map
             self.update_costmap_canvas()
 
-    # === NOUVEL EXPORT (Liste de Waypoints) ===
+# === NOUVEL EXPORT (Avec Point de Départ, Arrivée et Orientation) ===
     def export_code(self):
-        if not self.current_path: 
-            messagebox.showerror("Erreur", "Veuillez d'abord calculer une trajectoire.")
+        if not self.current_path or not self.start_pos or not self.end_pos: 
+            messagebox.showerror("Erreur", "Veuillez d'abord calculer une trajectoire avec A et B.")
             return
 
-        cpp_code = f"// MISSION VEGA SC317 - TRAJECTOIRE A*\n"
+        # 1. Conversion des points A et B en mètres
+        start_x = self.start_pos[0] * (CELL_SIZE_CM / 100.0)
+        start_y = self.start_pos[1] * (CELL_SIZE_CM / 100.0)
+        
+        goal_x = self.end_pos[0] * (CELL_SIZE_CM / 100.0)
+        goal_y = self.end_pos[1] * (CELL_SIZE_CM / 100.0)
+
+        # 2. Calcul de l'orientation initiale (Regard pointé vers le cap suivant)
+        start_theta = 0.0
+        if len(self.current_path) > 1:
+            # On prend le 1er et le 2ème point du chemin calculé
+            p0 = self.current_path[0]
+            p1 = self.current_path[1]
+            dx = (p1[0] - p0[0]) * (CELL_SIZE_CM / 100.0)
+            dy = (p1[1] - p0[1]) * (CELL_SIZE_CM / 100.0)
+            start_theta = np.arctan2(dy, dx)
+
+        # 3. Génération du code C++
+        cpp_code = f"// ==========================================\n"
+        cpp_code += f"// MISSION VEGA SC317 - TRAJECTOIRE A*\n"
+        cpp_code += f"// ==========================================\n\n"
         cpp_code += f"#ifndef MISSION_EXPORT_H\n#define MISSION_EXPORT_H\n\n"
+        
+        cpp_code += f"// --- Points clés de la mission ---\n"
+        cpp_code += f"const float START_X = {start_x:.3f};\n"
+        cpp_code += f"const float START_Y = {start_y:.3f};\n"
+        cpp_code += f"const float START_THETA = {start_theta:.3f}; // Angle initial (radians)\n\n"
+        
+        cpp_code += f"const float GOAL_X = {goal_x:.3f};\n"
+        cpp_code += f"const float GOAL_Y = {goal_y:.3f};\n\n"
+        
+        cpp_code += f"// --- Trajectoire ---\n"
         cpp_code += f"struct Waypoint {{\n    float x; // mètres\n    float y; // mètres\n}};\n\n"
+        
         cpp_code += f"const int PATH_SIZE = {len(self.current_path)};\n"
         cpp_code += f"const Waypoint MISSION_PATH[PATH_SIZE] = {{\n"
         
         for p in self.current_path:
-            # Conversion de grille (0-40) en coordonnées réelles (0.0m - 4.0m)
             real_x = p[0] * (CELL_SIZE_CM / 100.0)
             real_y = p[1] * (CELL_SIZE_CM / 100.0)
-            cpp_code += f"    {{{real_x:.2f}f, {real_y:.2f}f}},\n"
+            cpp_code += f"    {{{real_x:.3f}f, {real_y:.3f}f}},\n"
             
-        cpp_code += "};\n\n#endif"
+        cpp_code += "};\n\n#endif\n"
         
+        # 4. Sauvegarde
         export_path = os.path.join(os.path.dirname(__file__), "mission_export.h")
         with open(export_path, "w") as f:
             f.write(cpp_code)
             
-        messagebox.showinfo("Export Réussi", f"Trajectoire de {len(self.current_path)} points exportée !")
+        messagebox.showinfo("Export Réussi", f"Trajectoire de {len(self.current_path)} points exportée avec coordonnées de départ !")
 
 if __name__ == "__main__":
     root = tk.Tk()
