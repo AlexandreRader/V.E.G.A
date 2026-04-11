@@ -1,37 +1,102 @@
 #include <Arduino.h>
-#include "mission_export.h"
-#include "PathFollower.h"
-#include "Kinematics.h"
+#include <Wire.h>
+#include "mission_export.h" // Généré par ta Station Sol
+#include "../lib/Navigation/Navigation.h"     // Contrôleur principal intégré
 
-// --- Objets Globaux ---
-PathFollower follower;
-Kinematics kinematics;
+// ==========================================
+// SYSTÈME INTÉGRÉ VEGA SC317
+// ==========================================
 
-// --- Variables d'état du robot ---
-// Initialisées automatiquement avec les données générées par Python !
-float robot_x = START_X; 
-float robot_y = START_Y;
-float robot_theta = START_THETA; 
+// Instance du contrôleur principal
+NavigationController nav_controller;
+
+// Variables pour les commandes série (debug)
+String serial_command = "";
+
+// Forward declarations
+void processSerialCommand(String cmd);
+
+// ==========================================
+// FONCTIONS ARDUINO STANDARD
+// ==========================================
 
 void setup() {
     Serial.begin(115200);
-    
-    // Exemple : Initialisation de l'IMU
-    // IMU.begin();
-    // IMU.setOffset(START_THETA); // On dit à l'IMU : "Ton zéro actuel correspond à cet angle"
-    
-    Serial.printf("Boot VEGA SC317. Départ: [%.2f, %.2f] Cap: %.2f rad\n", 
-                  robot_x, robot_y, robot_theta);
+    delay(1000);
+
+    Serial.println("\n🚀 VEGA SC317 - DÉMARRAGE SYSTÈME");
+    Serial.println("=================================");
+
+    // Initialisation complète du système
+    if (nav_controller.initialize()) {
+        Serial.println("✅ Système initialisé avec succès");
+        Serial.println("Commandes disponibles:");
+        Serial.println("  'start'  - Démarrer la mission");
+        Serial.println("  'stop'   - Arrêter la mission");
+        Serial.println("  'reset'  - Reset du système");
+        Serial.println("  'status' - État du système");
+        Serial.println("  'help'   - Cette aide");
+    } else {
+        Serial.println("❌ Échec de l'initialisation - Vérifiez les connexions");
+        while (true) {
+            delay(1000);
+        }
+    }
+
+    Serial.println("\n=== SYSTÈME PRÊT ===\n");
 }
 
 void loop() {
-    // 1. Lire l'IMU pour mettre à jour robot_theta
-    // 2. Mettre à jour robot_x et robot_y (Odometrie + IMU)
-    
-    if (!follower.isDone()) {
-        VelocityCommand v_cmd = follower.update(robot_x, robot_y, robot_theta);
-        MotorCommands m_cmds = kinematics.calculateDrive(v_cmd.linear_v, v_cmd.angular_w);
-        
-        // Appliquer aux moteurs...
+    // ==========================================
+    // TRAITEMENT DES COMMANDES SÉRIE (DEBUG)
+    // ==========================================
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (serial_command.length() > 0) {
+                processSerialCommand(serial_command);
+                serial_command = "";
+            }
+        } else {
+            serial_command += c;
+        }
+    }
+
+    // ==========================================
+    // BOUCLE PRINCIPALE DE NAVIGATION
+    // ==========================================
+    nav_controller.update();
+
+    // Délai pour éviter la surcharge CPU
+    delay(10);
+}
+
+// ==========================================
+// TRAITEMENT DES COMMANDES SÉRIE
+// ==========================================
+
+void processSerialCommand(String cmd) {
+    cmd.trim();
+    cmd.toLowerCase();
+
+    Serial.printf("Commande reçue: %s\n", cmd.c_str());
+
+    if (cmd == "start") {
+        nav_controller.startMission();
+    } else if (cmd == "stop") {
+        nav_controller.stopMission();
+    } else if (cmd == "reset") {
+        nav_controller.resetSystem();
+    } else if (cmd == "status") {
+        nav_controller.printSystemStatus();
+    } else if (cmd == "help") {
+        Serial.println("Commandes disponibles:");
+        Serial.println("  start  - Démarrer la mission");
+        Serial.println("  stop   - Arrêter la mission");
+        Serial.println("  reset  - Reset du système");
+        Serial.println("  status - État du système");
+        Serial.println("  help   - Cette aide");
+    } else {
+        Serial.printf("Commande inconnue: %s\n", cmd.c_str());
     }
 }

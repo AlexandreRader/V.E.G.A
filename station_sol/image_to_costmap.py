@@ -4,12 +4,17 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 import os
+import glob
 import heapq # Ajout pour l'algorithme A*
 
 # --- CONFIGURATION PHYSIQUE DE LA PISTE ---
 MAP_WIDTH_M = 4.0   
 MAP_HEIGHT_M = 6.0  
 CELL_SIZE_CM = 10.0 
+
+# --- CONFIGURATION CALIBRATION ---
+CHESSBOARD_SIZE = (9, 6)    # coins intérieurs du motif de calibration
+SQUARE_SIZE = 1.0           # taille arbitraire des cases, unité relative
 
 # --- CONFIGURATION TRAITEMENT ---
 ROBOT_WIDTH_CM = 30.0 
@@ -30,6 +35,9 @@ class CostmapApp:
         self.warped_img = None
         self.costmap_grid = None 
         self.current_path = [] # NOUVEAU : Stockage de la trajectoire
+        self.camera_matrix = None
+        self.dist_coeffs = None
+        self.calibration_file = None
         
         self.points_source = [] 
         self.canvas_points = [] 
@@ -59,6 +67,8 @@ class CostmapApp:
         btn_style = {"font": ("Arial", 10, "bold"), "fg": "white", "padx": 10, "pady": 5}
 
         tk.Button(btn_frame, text="1. Charger l'image", command=self.load_image, bg="#4CAF50", **btn_style).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="Calibrer Caméra", command=self.calibrate_camera, bg="#607D8B", **btn_style).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="Charger Calib.", command=self.load_calibration, bg="#795548", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="2. Redresser (Perspective)", command=self.correct_perspective, bg="#9C27B0", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="3. Générer Costmap", command=self.process_image, bg="#2196F3", **btn_style).pack(side=tk.LEFT, padx=10)
         # NOUVEAU BOUTON !
@@ -127,6 +137,111 @@ class CostmapApp:
         self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
 
     # === METHODES IMAGE (Inchangées) ===
+    def get_display_image(self, img):
+        if self.camera_matrix is not None and self.dist_coeffs is not None:
+            return cv2.undistort(img, self.camera_matrix, self.dist_coeffs)
+        return img
+
+    def redraw_original_image(self):
+        if self.original_img is None:
+            return
+        img_disp = self.fit_image_to_box(self.get_display_image(self.original_img))
+        self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB)))
+        self.canvas_orig.delete("all")
+        self.canvas_orig.create_image(250, 250, image=self.photo_orig, anchor=tk.CENTER)
+        if self.points_source:
+            self.reset_points()
+
+    def calibrate_camera(self):
+        image_paths = list(filedialog.askopenfilenames(title="Sélectionner images de calibration", filetypes=[("Images", "*.jpg *.jpeg *.png *.JPG *.JPEG *.PNG")]))
+        if not image_paths:
+            folder = filedialog.askdirectory(title="Choisir dossier images de calibration")
+            if not folder:
+                return
+            image_paths = sorted(
+                glob.glob(os.path.join(folder, "*.jpg")) +
+                glob.glob(os.path.join(folder, "*.jpeg")) +
+                glob.glob(os.path.join(folder, "*.png")) +
+                glob.glob(os.path.join(folder, "*.JPG")) +
+                glob.glob(os.path.join(folder, "*.JPEG")) +
+                glob.glob(os.path.join(folder, "*.PNG"))
+            )
+
+        if len(image_paths) < 3:
+            messagebox.showerror("Erreur", f"Au moins 3 images de calibration sont nécessaires. Images trouvées : {len(image_paths)}")
+            return
+
+        pattern = CHESSBOARD_SIZE
+        objp = np.zeros((pattern[0] * pattern[1], 3), np.float32)
+        objp[:, :2] = np.mgrid[0:pattern[0], 0:pattern[1]].T.reshape(-1, 2) * SQUARE_SIZE
+
+        objpoints = []
+        imgpoints = []
+        valid_images = 0
+        first_valid_img = None
+        last_valid_img = None
+
+        for idx, path in enumerate(image_paths):
+            stream = np.fromfile(path, dtype=np.uint8)
+            img = cv2.imdecode(stream, cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            found, corners = cv2.findChessboardCorners(gray, pattern, None)
+            if found:
+                valid_images += 1
+                corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
+                                            criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
+                objpoints.append(objp)
+                imgpoints.append(corners2)
+                if first_valid_img is None:
+                    first_valid_img = cv2.drawChessboardCorners(img.copy(), pattern, corners2, found)
+                last_valid_img = cv2.drawChessboardCorners(img.copy(), pattern, corners2, found)
+
+        if valid_images < 3:
+            help_text = ("Aucun damier n'a pu être détecté. Suggestions :\n\n"
+                        "1. Utilisez un damier PAPIER ou PLASTIQUE (pas de verre)\n"
+                        "2. Améliorez l'éclairage (évitez reflets et ombres)\n"
+                        "3. Assurez-vous qu'aucune partie du damier n'est coupée\n"
+                        "4. Variez les angles et distances de prise de vue\n"
+                        "5. Vérifiez la taille du damier : 9x6 coins intérieurs\n\n"
+                        f"Images trouvées : {len(image_paths)}\n"
+                        f"Images avec damier détecté : {valid_images}")
+            messagebox.showerror("Erreur calibration", help_text)
+            return
+        
+        if first_valid_img is not None:
+            disp_img = cv2.resize(first_valid_img, (400, 300))
+            cv2.imshow("Damier détecté (1ère image valide)", disp_img)
+            cv2.waitKey(2000)
+            cv2.destroyAllWindows()
+
+        ret, mtx, dist, _, _ = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
+        self.camera_matrix = mtx
+        self.dist_coeffs = dist
+        self.calibration_file = os.path.join(folder, "camera_calibration.npz")
+        np.savez(self.calibration_file, camera_matrix=mtx, dist_coeffs=dist)
+
+        messagebox.showinfo("Calibration réussie", f"Calibration enregistrée dans :\n{self.calibration_file}\nErreur RMS = {ret:.4f}")
+        self.lbl_status.config(text="Calibration chargée.")
+        if self.original_img is not None:
+            self.redraw_original_image()
+
+    def load_calibration(self):
+        path = filedialog.askopenfilename(filetypes=[("NumPy file", "*.npz")], title="Charger calibration camera")
+        if not path:
+            return
+        try:
+            data = np.load(path)
+            self.camera_matrix = data["camera_matrix"]
+            self.dist_coeffs = data["dist_coeffs"]
+            self.calibration_file = path
+            self.lbl_status.config(text=f"Calibration chargée : {os.path.basename(path)}")
+            if self.original_img is not None:
+                self.redraw_original_image()
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de charger la calibration :\n{e}")
+
     def fit_image_to_box(self, img, box_size=500):
         h, w = img.shape[:2]
         scale = box_size / max(h, w)
@@ -139,7 +254,7 @@ class CostmapApp:
             self.original_img = cv2.imdecode(stream, cv2.IMREAD_COLOR)
             if self.original_img is None: return
             self.reset_points()
-            img_disp = self.fit_image_to_box(self.original_img)
+            img_disp = self.fit_image_to_box(self.get_display_image(self.original_img))
             self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB)))
             self.canvas_orig.delete("all")
             self.canvas_orig.create_image(250, 250, image=self.photo_orig, anchor=tk.CENTER)
@@ -183,8 +298,9 @@ class CostmapApp:
         rect_ordered = self.order_points(pts)
         dest_w, dest_h = int(MAP_WIDTH_M * 100), int(MAP_HEIGHT_M * 100)
         points_dest = np.float32([[0, 0], [dest_w - 1, 0], [dest_w - 1, dest_h - 1], [0, dest_h - 1]])
+        src_img = self.get_display_image(self.original_img)
         matrix = cv2.getPerspectiveTransform(rect_ordered, points_dest)
-        self.warped_img = cv2.warpPerspective(self.original_img, matrix, (dest_w, dest_h))
+        self.warped_img = cv2.warpPerspective(src_img, matrix, (dest_w, dest_h))
         img_disp = self.fit_image_to_box(self.warped_img)
         self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB))) 
         self.canvas_orig.delete("all")

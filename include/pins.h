@@ -50,6 +50,14 @@
 #define PIN_STEP_M6 36
 #define PIN_DIR_M6  35
 
+// --- COMMUNICATION SERIE (TMC2208) ---
+#define PIN_UART_RX 44
+#define PIN_UART_TX 43
+
+// --- CAPTEUR IR DOCKING ---
+#define PIN_IR_DOCKING 34
+#define PIN_DIR_M6  35
+
 // --- CAPTEURS DIVERS ---
 #define PIN_IR_SENSOR 21
 

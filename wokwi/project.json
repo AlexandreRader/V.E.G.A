@@ -1,0 +1,14 @@
+{
+  "name": "VEGA SC317 Robot Simulation",
+  "description": "Autonomous wheeled robot simulation testing kinematics and path following",
+  "mainFile": "src/main_wokwi.cpp",
+  "files": [
+    "src/main_wokwi.cpp",
+    "lib/Pathfinding/Kinematics.h",
+    "lib/Pathfinding/Kinematics.cpp",
+    "lib/Pathfinding/PathFollower.h",
+    "lib/Pathfinding/PathFollower.cpp",
+    "station_sol/mission_export.h"
+  ],
+  "dependencies": {}
+}

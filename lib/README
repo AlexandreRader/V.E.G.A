@@ -1,46 +1,76 @@
 
-This directory is intended for project specific (private) libraries.
-PlatformIO will compile them to static libraries and link into the executable file.
+# VEGA SC317 - Robot Control Libraries
 
-The source code of each library should be placed in a separate directory
-("lib/your_library_name/[Code]").
+This directory contains all the control libraries for the VEGA SC317 autonomous wheeled robot.
 
-For example, see the structure of the following example libraries `Foo` and `Bar`:
-
-|--lib
-|  |
-|  |--Bar
-|  |  |--docs
-|  |  |--examples
-|  |  |--src
-|  |     |- Bar.c
-|  |     |- Bar.h
-|  |  |- library.json (optional. for custom build options, etc) https://docs.platformio.org/page/librarymanager/config.html
-|  |
-|  |--Foo
-|  |  |- Foo.c
-|  |  |- Foo.h
-|  |
-|  |- README --> THIS FILE
-|
-|- platformio.ini
-|--src
-   |- main.c
-
-Example contents of `src/main.c` using Foo and Bar:
-```
-#include <Foo.h>
-#include <Bar.h>
-
-int main (void)
-{
-  ...
-}
+## Directory Structure
 
 ```
+lib/
+├── Communication/     # NRF24L01 wireless communication
+├── Control/          # Hardware actuators (servos, motors)
+├── EKF/             # Extended Kalman Filter for state estimation
+├── Navigation/      # Main navigation controller and state machine
+├── Pathfinding/     # Path following and kinematics algorithms
+├── Sensors/         # Obstacle detection and precision sensors
+└── README          # This file
+```
 
-The PlatformIO Library Dependency Finder will find automatically dependent
-libraries by scanning project source files.
+## Library Overview
 
-More information about PlatformIO Library Dependency Finder
-- https://docs.platformio.org/page/librarymanager/ldf.html
+### Communication
+- NRF24L01 radio communication with ground station
+- Multi-format data reception (strings, floats, raw data)
+- Bidirectional communication with acknowledgments
+
+### Control
+- Hardware actuator management
+- 4 servo motors for 4-wheel steering (PCA9685)
+- 6 stepper motors for propulsion (TMC2208)
+- Safety systems and motor control
+
+### EKF (Extended Kalman Filter)
+- State estimation combining IMU and odometry
+- Position, velocity, and orientation tracking
+- Sensor fusion for accurate localization
+
+### Navigation
+- Main navigation controller integrating all subsystems
+- State machine for mission management
+- Real-time navigation with obstacle avoidance
+
+### Pathfinding
+- A* path following algorithm
+- Instantaneous Center of Rotation (ICR) kinematics
+- 4-wheel steering control calculations
+
+### Sensors
+- 4x VL53L3CX ToF sensors for obstacle detection
+- IR docking sensor for precision target approach
+- Emergency stop and safety monitoring
+
+## Dependencies
+
+The following libraries are required (configured in `platformio.ini`):
+
+- `TMCStepper` - Stepper motor control
+- `Adafruit_PWMServoDriver` - Servo control
+- `VL53L3CX` - Time-of-flight sensors
+- `esp-idf-mirf` - NRF24L01 communication
+
+## Usage
+
+Include the libraries in your code:
+
+```cpp
+#include "Navigation/Navigation.h"      // Main controller
+#include "Communication/NRF.h"         // Radio communication
+#include "Control/HardwareControl.h"   // Actuators
+#include "Sensors/Detection.h"         // Obstacle detection
+```
+
+## Integration
+
+The system is designed with a modular architecture where each subsystem can be tested and developed independently while working together through the main `NavigationController` class.
+
+For detailed API documentation, see the README files in each subdirectory.
