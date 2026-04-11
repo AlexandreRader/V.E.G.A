@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "author": "VEGA SC317 Simulation",
+  "editor": "wokwi",
+ "serialMonitor": {
+  "collapse": false,
+  "convertEol": false,
+  "display": "terminal",
+  "newline": "lf"
+},
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp32",
+      "top": 0,
+      "left": 0,
+      "attrs": {"serialInterface": "USB_SERIAL_JTAG"}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_status",
+      "top": 50,
+      "left": 320,
+      "attrs": { "color": "white" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_servo_fl",
+      "top": 200,
+      "left": 50,
+      "attrs": { "color": "red" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_servo_fr",
+      "top": 200,
+      "left": 100,
+      "attrs": { "color": "green" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_servo_rl",
+      "top": 200,
+      "left": 150,
+      "attrs": { "color": "blue" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_servo_rr",
+      "top": 200,
+      "left": 200,
+      "attrs": { "color": "yellow" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_motor_fl",
+      "top": 300,
+      "left": 50,
+      "attrs": { "color": "red" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_motor_fr",
+      "top": 300,
+      "left": 100,
+      "attrs": { "color": "green" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_motor_ml",
+      "top": 300,
+      "left": 150,
+      "attrs": { "color": "blue" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_motor_mr",
+      "top": 300,
+      "left": 200,
+      "attrs": { "color": "yellow" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_motor_rl",
+      "top": 300,
+      "left": 250,
+      "attrs": { "color": "purple" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_motor_rr",
+      "top": 300,
+      "left": 300,
+      "attrs": { "color": "orange" }
+    }
+  ],
+  "connections": [
+
+    ["esp32:2", "led_status:A", "white", ["v0"]],
+    ["esp32:GND.1", "led_status:C", "black", ["v0"]],
+
+    ["esp32:12", "led_servo_fl:A", "red", ["v0"]],
+    ["esp32:GND.1", "led_servo_fl:C", "black", ["v0"]],
+
+    ["esp32:13", "led_servo_fr:A", "green", ["v0"]],
+    ["esp32:GND.1", "led_servo_fr:C", "black", ["v0"]],
+
+    ["esp32:14", "led_servo_rl:A", "blue", ["v0"]],
+    ["esp32:GND.1", "led_servo_rl:C", "black", ["v0"]],
+
+    ["esp32:15", "led_servo_rr:A", "yellow", ["v0"]],
+    ["esp32:GND.1", "led_servo_rr:C", "black", ["v0"]],
+
+    ["esp32:16", "led_motor_fl:A", "red", ["v0"]],
+    ["esp32:GND.1", "led_motor_fl:C", "black", ["v0"]],
+
+    ["esp32:17", "led_motor_fr:A", "green", ["v0"]],
+    ["esp32:GND.1", "led_motor_fr:C", "black", ["v0"]],
+
+    ["esp32:1", "led_motor_ml:A", "blue", ["v0"]],
+    ["esp32:GND.1", "led_motor_ml:C", "black", ["v0"]],
+
+    ["esp32:3", "led_motor_mr:A", "yellow", ["v0"]],
+    ["esp32:GND.1", "led_motor_mr:C", "black", ["v0"]],
+
+    ["esp32:21", "led_motor_rl:A", "purple", ["v0"]],
+    ["esp32:GND.1", "led_motor_rl:C", "black", ["v0"]],
+
+    ["esp32:42", "led_motor_rr:A", "orange", ["v0"]],
+    ["esp32:GND.1", "led_motor_rr:C", "black", ["v0"]]
+  ]
+}

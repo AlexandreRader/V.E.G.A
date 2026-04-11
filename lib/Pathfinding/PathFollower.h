@@ -1,6 +1,6 @@
 #pragma once
 #include <Arduino.h>
-#include "mission_export.h" // Le fichier généré par votre station sol Python
+#include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Le fichier généré par votre station sol Python
 
 // Structure pour renvoyer la consigne globale du robot
 struct VelocityCommand {

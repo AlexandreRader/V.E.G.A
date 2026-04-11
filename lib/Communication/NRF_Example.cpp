@@ -11,7 +11,7 @@
  */
 
 #include <Arduino.h>
-#include "Communication/NRF.h"
+#include "/home/wankeur/Documents/Code/Github/V.E.G.A/lib/Communication/NRF.h"
 
 // ==========================================
 // CONFIGURATION ET VARIABLES GLOBALES

@@ -10,9 +10,11 @@
  * - Focus on kinematics and path following logic
  */
 
+
+
 #include <Arduino.h>
 #ifdef WOKWI_SIMULATION
-#include "../wokwi/mission_export.h" // Test mission for simulation
+#include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Test mission for simulation
 #else
 #include "mission_export.h" // Real mission from ground station
 #endif
@@ -26,10 +28,9 @@
 
 class SimulatedActuators {
 private:
-    // Status LED indicator (GPIO 2) - blinks to show firmware is running
-    const uint8_t LED_STATUS = 2;
+    const uint8_t LED_STATUS = 2; // OK
     
-    // LED pins for simulation (instead of real servos/steppers)
+    // On évite 18, 19 et 20 à tout prix
     const uint8_t LED_SERVO_FL = 12;
     const uint8_t LED_SERVO_FR = 13;
     const uint8_t LED_SERVO_RL = 14;
@@ -37,10 +38,12 @@ private:
 
     const uint8_t LED_MOTOR_FL = 16;
     const uint8_t LED_MOTOR_FR = 17;
-    const uint8_t LED_MOTOR_ML = 18;
-    const uint8_t LED_MOTOR_MR = 19;
+    
+    // NOUVELLES BROCHES SÉCURISÉES POUR LE S3
+    const uint8_t LED_MOTOR_ML = 1; 
+    const uint8_t LED_MOTOR_MR = 3;
     const uint8_t LED_MOTOR_RL = 21;
-    const uint8_t LED_MOTOR_RR = 22;
+    const uint8_t LED_MOTOR_RR = 42;
 
 public:
     void begin() {
@@ -89,8 +92,15 @@ public:
         analogWrite(LED_SERVO_RL, bright_rl);
         analogWrite(LED_SERVO_RR, bright_rr);
 
-        Serial.printf("SERVO ANGLES -> FL:%.1f°, FR:%.1f°, RL:%.1f°, RR:%.1f°\n",
-                      fl * 180/PI, fr * 180/PI, rl * 180/PI, rr * 180/PI);
+        Serial.print("SERVO ANGLES FL:");
+        Serial.print(fl * 180/PI, 1);
+        Serial.print("° FR:");
+        Serial.print(fr * 180/PI, 1);
+        Serial.print("° RL:");
+        Serial.print(rl * 180/PI, 1);
+        Serial.print("° RR:");
+        Serial.print(rr * 180/PI, 1);
+        Serial.println("°");
     }
 
     // Simulate stepper control with LED blinking
@@ -118,8 +128,19 @@ public:
             last_toggle = millis();
         }
 
-        Serial.printf("STEPPER SPEEDS -> FL:%.0fHz, FR:%.0fHz, ML:%.0fHz, MR:%.0fHz, RL:%.0fHz, RR:%.0fHz\n",
-                      fl, fr, ml, mr, rl, rr);
+        Serial.print("STEPPER SPEEDS FL:");
+        Serial.print(fl, 0);
+        Serial.print("Hz FR:");
+        Serial.print(fr, 0);
+        Serial.print("Hz ML:");
+        Serial.print(ml, 0);
+        Serial.print("Hz MR:");
+        Serial.print(mr, 0);
+        Serial.print("Hz RL:");
+        Serial.print(rl, 0);
+        Serial.print("Hz RR:");
+        Serial.print(rr, 0);
+        Serial.println("Hz");
     }
 };
 
@@ -157,8 +178,9 @@ public:
 // MAIN TEST PROGRAM
 // ==========================================
 
-PathFollower follower;
-Kinematics kinematics;
+PathFollower* follower = nullptr;
+Kinematics* kinematics = nullptr;
+//EKFManager *ekf = nullptr; // Si tu l'utilises
 SimulatedActuators actuators;
 SimulatedIMU imu;
 
@@ -181,32 +203,34 @@ void runSimulationStep();
 void printStatus();
 
 void setup() {
-    Serial.begin(115200);
     
-    delay(1000);
 
-    Serial.println("\n🚀 VEGA SC317 - WOKWI SIMULATION TEST");
-    Serial.println("=====================================");
-    Serial.printf("Mission: %.2f, %.2f -> %.2f, %.2f\n", START_X, START_Y, GOAL_X, GOAL_Y);
-    Serial.printf("Path points: %d\n", PATH_SIZE);
+    Serial.begin(115200);
 
-    // Initialize simulated components
+    delay(1000); 
+
+    Serial.println("\n--- TEST CONNEXION VEGA ---");
+    Serial.println("Si tu vois ce message, le pont TCP fonctionne !");
+    
+    uint32_t start = millis();
+    while (!Serial && (millis() - start) < 3000); 
+
+    Serial.println("\n🚀 VEGA SC317 - INITIALISATION...");
+
+    // Initialisation dynamique (sur le Tas/Heap)
+    follower = new PathFollower();
+    kinematics = new Kinematics();
+    
+
     actuators.begin();
-    if (imu.begin()) {
-        Serial.println("✅ Simulated IMU: OK");
-    }
+    imu.begin();
 
-    // Display mission waypoints
-    Serial.println("\nWAYPOINTS:");
-    for (int i = 0; i < PATH_SIZE; i++) {
-        Serial.printf("  %d: (%.2f, %.2f)\n", i, MISSION_PATH[i].x, MISSION_PATH[i].y);
-    }
-
-    Serial.println("\n=== READY - Type 'start' to begin simulation ===");
+    Serial.println("✅ Système prêt. Tapez 'start' pour lancer la mission.");
 }
 
 void loop() {
     // Status LED indicator (blinking confirms code is running)
+    
     actuators.blinkStatus();
     
     // Check for serial commands
@@ -226,27 +250,30 @@ void loop() {
         }
     }
 
-    // Run simulation if mission is active
-    if (mission_started && !follower.isDone()) {
-        runSimulationStep();
-    } else if (mission_started && follower.isDone()) {
-        Serial.println("\n🎯 MISSION COMPLETE!");
-        mission_started = false;
+    // AJOUT D'UNE SÉCURITÉ : On vérifie que les objets existent bien
+    if (mission_started && follower != nullptr && kinematics != nullptr) {
+        if (!follower->isDone()) {
+            runSimulationStep();
+        } else {
+            Serial.println("🎯 MISSION COMPLETE!");
+            mission_started = false;
+        }
     }
-
+    
     delay(100); // 10Hz simulation
 }
 
 void startMission() {
     if (!mission_started) {
-        follower.resetMission();
+        follower->resetMission();
         mission_started = true;
         mission_start_time = millis();
+        last_update = millis(); // Initialize timing to avoid huge dt on first step
         robot_x = START_X;
         robot_y = START_Y;
         robot_theta = START_THETA;
 
-        Serial.println("\n▶️  MISSION STARTED");
+        Serial.println("MISSION STARTED");
         Serial.printf("Starting position: (%.2f, %.2f) @ %.1f°\n",
                       robot_x, robot_y, robot_theta * 180/PI);
     }
@@ -258,7 +285,7 @@ void stopMission() {
     current_w = 0;
     actuators.setServoAngles(0, 0, 0, 0);
     actuators.setStepperSpeeds(0, 0, 0, 0, 0, 0);
-    Serial.println("\n⏹️  MISSION STOPPED");
+    Serial.println("MISSION STOPPED");
 }
 
 void runSimulationStep() {
@@ -266,20 +293,20 @@ void runSimulationStep() {
     float dt = (now - last_update) / 1000.0;
     last_update = now;
 
-    // Update robot position (simulated IMU)
-    robot_theta = imu.getCurrentTheta();
+    // Path following FIRST to get velocity commands
+    VelocityCommand cmd = follower->update(robot_x, robot_y, robot_theta);
+    current_v = cmd.linear_v;
+    current_w = cmd.angular_w;
+
+    // Update robot orientation by integrating angular velocity
+    robot_theta += current_w * dt;
 
     // Simulate odometry (perfect for testing)
     robot_x += current_v * cos(robot_theta) * dt;
     robot_y += current_v * sin(robot_theta) * dt;
 
-    // Path following
-    VelocityCommand cmd = follower.update(robot_x, robot_y, robot_theta);
-    current_v = cmd.linear_v;
-    current_w = cmd.angular_w;
-
     // Kinematics calculation
-    MotorCommands motor_cmds = kinematics.calculateDrive(current_v, current_w);
+    MotorCommands motor_cmds = kinematics->calculateDrive(current_v, current_w);
 
     // Actuator control (simulated)
     actuators.setServoAngles(
@@ -288,19 +315,19 @@ void runSimulationStep() {
     );
 
     // Convert speeds to Hz
-    float hz_fl = kinematics.speedToStepsHz(motor_cmds.speed_FL);
-    float hz_fr = kinematics.speedToStepsHz(motor_cmds.speed_FR);
-    float hz_ml = kinematics.speedToStepsHz(motor_cmds.speed_ML);
-    float hz_mr = kinematics.speedToStepsHz(motor_cmds.speed_MR);
-    float hz_rl = kinematics.speedToStepsHz(motor_cmds.speed_RL);
-    float hz_rr = kinematics.speedToStepsHz(motor_cmds.speed_RR);
+    float hz_fr = kinematics->speedToStepsHz(motor_cmds.speed_FR);
+    float hz_ml = kinematics->speedToStepsHz(motor_cmds.speed_ML);
+    float hz_mr = kinematics->speedToStepsHz(motor_cmds.speed_MR);
+    float hz_rl = kinematics->speedToStepsHz(motor_cmds.speed_RL);
+    float hz_fl = kinematics->speedToStepsHz(motor_cmds.speed_FL);
+    float hz_rr = kinematics->speedToStepsHz(motor_cmds.speed_RR);
 
     actuators.setStepperSpeeds(hz_fl, hz_fr, hz_ml, hz_mr, hz_rl, hz_rr);
 
     // Status output (every 500ms)
     static unsigned long last_status = 0;
     if (now - last_status > 500) {
-        int current_waypoint = follower.isDone() ? PATH_SIZE - 1 : 0;
+        int current_waypoint = follower->isDone() ? PATH_SIZE - 1 : 0;
         for (int i = 0; i < PATH_SIZE - 1; i++) {
             float dx = MISSION_PATH[i+1].x - MISSION_PATH[i].x;
             float dy = MISSION_PATH[i+1].y - MISSION_PATH[i].y;
@@ -312,10 +339,23 @@ void runSimulationStep() {
             }
         }
 
-        Serial.printf("POS: [%.2f, %.2f] | θ:%.1f° | V:%.2f W:%.2f | WP:%d/%d | Time:%.1fs\n",
-                      robot_x, robot_y, robot_theta * 180/PI,
-                      current_v, current_w, current_waypoint + 1, PATH_SIZE,
-                      (now - mission_start_time) / 1000.0);
+        Serial.print("POS [X:");
+        Serial.print(robot_x, 2);
+        Serial.print(" Y:");
+        Serial.print(robot_y, 2);
+        Serial.print("] THETA:");
+        Serial.print(robot_theta * 180/PI, 1);
+        Serial.print("° V:");
+        Serial.print(current_v, 2);
+        Serial.print(" W:");
+        Serial.print(current_w, 2);
+        Serial.print(" WP:");
+        Serial.print(current_waypoint + 1);
+        Serial.print("/");
+        Serial.print(PATH_SIZE);
+        Serial.print(" TIME:");
+        Serial.print((now - mission_start_time) / 1000.0, 1);
+        Serial.println("s");
         last_status = now;
     }
 }
@@ -325,7 +365,43 @@ void printStatus() {
     Serial.printf("Mission active: %s\n", mission_started ? "YES" : "NO");
     Serial.printf("Position: (%.2f, %.2f) @ %.1f°\n", robot_x, robot_y, robot_theta * 180/PI);
     Serial.printf("Velocity: V=%.2f m/s, W=%.2f rad/s\n", current_v, current_w);
-    Serial.printf("Mission progress: %s\n", follower.isDone() ? "COMPLETE" : "IN PROGRESS");
+    Serial.printf("Mission progress: %s\n", follower->isDone() ? "COMPLETE" : "IN PROGRESS");
     Serial.printf("Elapsed time: %.1f seconds\n", (millis() - mission_start_time) / 1000.0);
     Serial.println("========================");
 }
+
+
+
+/*
+
+#include <Arduino.h>
+
+// On teste uniquement la LED blanche sur le GPIO 2
+const uint8_t LED_TEST = 2;
+
+void setup() {
+    // Initialisation du Serial (indispensable pour l'USB du S3)
+    Serial.begin(115200);
+    
+    // Attente pour que le port série se réveille sur le PC/Wokwi
+    uint32_t start = millis();
+    while (!Serial && (millis() - start) < 3000); 
+
+    Serial.println("\n*********************************");
+    Serial.println("VEGA SC317 - TEST MINIMAL LED");
+    Serial.println("*********************************");
+
+    pinMode(LED_TEST, OUTPUT);
+    Serial.println("GPIO 2 configuré en SORTIE");
+}
+
+void loop() {
+    Serial.println("LED ON...");
+    digitalWrite(LED_TEST, HIGH);
+    delay(500);
+
+    Serial.println("LED OFF");
+    digitalWrite(LED_TEST, LOW);
+    delay(500);
+}
+*/

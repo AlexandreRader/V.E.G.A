@@ -1,5 +1,0 @@
-[wokwi]
-version = 1
-elf = "firmware.elf"
-firmware = "firmware.bin"
-gdbServerPort = 3333
