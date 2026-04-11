@@ -20,78 +20,120 @@
       "type": "wokwi-led",
       "id": "led_status",
       "top": 50,
-      "left": 320,
+      "left": 400,
       "attrs": { "color": "white" }
     },
     {
-      "type": "wokwi-led",
-      "id": "led_servo_fl",
+      "type": "wokwi-servo",
+      "id": "servo_fl",
       "top": 200,
-      "left": 50,
-      "attrs": { "color": "red" }
+      "left": 0,
+      "attrs": { "hornColor": "red" }
     },
     {
-      "type": "wokwi-led",
-      "id": "led_servo_fr",
-      "top": 200,
-      "left": 100,
-      "attrs": { "color": "green" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_servo_rl",
+      "type": "wokwi-servo",
+      "id": "servo_fr",
       "top": 200,
       "left": 150,
-      "attrs": { "color": "blue" }
+      "attrs": { "hornColor": "green" }
     },
     {
-      "type": "wokwi-led",
-      "id": "led_servo_rr",
+      "type": "wokwi-servo",
+      "id": "servo_rl",
       "top": 200,
-      "left": 200,
-      "attrs": { "color": "yellow" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_motor_fl",
-      "top": 300,
-      "left": 50,
-      "attrs": { "color": "red" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_motor_fr",
-      "top": 300,
-      "left": 100,
-      "attrs": { "color": "green" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_motor_ml",
-      "top": 300,
-      "left": 150,
-      "attrs": { "color": "blue" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_motor_mr",
-      "top": 300,
-      "left": 200,
-      "attrs": { "color": "yellow" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_motor_rl",
-      "top": 300,
-      "left": 250,
-      "attrs": { "color": "purple" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_motor_rr",
-      "top": 300,
       "left": 300,
-      "attrs": { "color": "orange" }
+      "attrs": { "hornColor": "blue" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo_rr",
+      "top": 200,
+      "left": 450,
+      "attrs": { "hornColor": "yellow" }
+    },
+    {
+      "type": "wokwi-a4988",
+      "id": "a4988_fl",
+      "top": 400,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper_fl",
+      "top": 500,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-a4988",
+      "id": "a4988_fr",
+      "top": 400,
+      "left": 200,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper_fr",
+      "top": 500,
+      "left": 200,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-a4988",
+      "id": "a4988_ml",
+      "top": 400,
+      "left": 400,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper_ml",
+      "top": 500,
+      "left": 400,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-a4988",
+      "id": "a4988_mr",
+      "top": 400,
+      "left": 600,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper_mr",
+      "top": 500,
+      "left": 600,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-a4988",
+      "id": "a4988_rl",
+      "top": 650,
+      "left": 200,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper_rl",
+      "top": 750,
+      "left": 200,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-a4988",
+      "id": "a4988_rr",
+      "top": 650,
+      "left": 400,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper_rr",
+      "top": 750,
+      "left": 400,
+      "attrs": {}
     }
   ],
   "connections": [
@@ -99,34 +141,74 @@
     ["esp32:2", "led_status:A", "white", ["v0"]],
     ["esp32:GND.1", "led_status:C", "black", ["v0"]],
 
-    ["esp32:12", "led_servo_fl:A", "red", ["v0"]],
-    ["esp32:GND.1", "led_servo_fl:C", "black", ["v0"]],
+    ["esp32:12", "servo_fl:PWM", "red", ["v0"]],
+    ["esp32:3V3", "servo_fl:V+", "red", ["v0"]],
+    ["esp32:GND.1", "servo_fl:GND", "black", ["v0"]],
 
-    ["esp32:13", "led_servo_fr:A", "green", ["v0"]],
-    ["esp32:GND.1", "led_servo_fr:C", "black", ["v0"]],
+    ["esp32:13", "servo_fr:PWM", "green", ["v0"]],
+    ["esp32:3V3", "servo_fr:V+", "green", ["v0"]],
+    ["esp32:GND.1", "servo_fr:GND", "black", ["v0"]],
 
-    ["esp32:14", "led_servo_rl:A", "blue", ["v0"]],
-    ["esp32:GND.1", "led_servo_rl:C", "black", ["v0"]],
+    ["esp32:14", "servo_rl:PWM", "blue", ["v0"]],
+    ["esp32:3V3", "servo_rl:V+", "blue", ["v0"]],
+    ["esp32:GND.1", "servo_rl:GND", "black", ["v0"]],
 
-    ["esp32:15", "led_servo_rr:A", "yellow", ["v0"]],
-    ["esp32:GND.1", "led_servo_rr:C", "black", ["v0"]],
+    ["esp32:11", "servo_rr:PWM", "yellow", ["v0"]],
+    ["esp32:3V3", "servo_rr:V+", "yellow", ["v0"]],
+    ["esp32:GND.1", "servo_rr:GND", "black", ["v0"]],
 
-    ["esp32:16", "led_motor_fl:A", "red", ["v0"]],
-    ["esp32:GND.1", "led_motor_fl:C", "black", ["v0"]],
+    ["esp32:15", "a4988_fl:STEP", "red", ["v0"]],
+    ["esp32:16", "a4988_fl:DIR", "red", ["v0"]],
+    ["esp32:3V3", "a4988_fl:VDD", "red", ["v0"]],
+    ["esp32:GND.1", "a4988_fl:GND", "black", ["v0"]],
+    ["a4988_fl:A+", "stepper_fl:A+", "red", ["v0"]],
+    ["a4988_fl:A-", "stepper_fl:A-", "black", ["v0"]],
+    ["a4988_fl:B+", "stepper_fl:B+", "green", ["v0"]],
+    ["a4988_fl:B-", "stepper_fl:B-", "blue", ["v0"]],
 
-    ["esp32:17", "led_motor_fr:A", "green", ["v0"]],
-    ["esp32:GND.1", "led_motor_fr:C", "black", ["v0"]],
+    ["esp32:17", "a4988_fr:STEP", "green", ["v0"]],
+    ["esp32:18", "a4988_fr:DIR", "green", ["v0"]],
+    ["esp32:3V3", "a4988_fr:VDD", "green", ["v0"]],
+    ["esp32:GND.1", "a4988_fr:GND", "black", ["v0"]],
+    ["a4988_fr:A+", "stepper_fr:A+", "red", ["v0"]],
+    ["a4988_fr:A-", "stepper_fr:A-", "black", ["v0"]],
+    ["a4988_fr:B+", "stepper_fr:B+", "green", ["v0"]],
+    ["a4988_fr:B-", "stepper_fr:B-", "blue", ["v0"]],
 
-    ["esp32:1", "led_motor_ml:A", "blue", ["v0"]],
-    ["esp32:GND.1", "led_motor_ml:C", "black", ["v0"]],
+    ["esp32:42", "a4988_ml:STEP", "blue", ["v0"]],
+    ["esp32:41", "a4988_ml:DIR", "blue", ["v0"]],
+    ["esp32:3V3", "a4988_ml:VDD", "blue", ["v0"]],
+    ["esp32:GND.1", "a4988_ml:GND", "black", ["v0"]],
+    ["a4988_ml:A+", "stepper_ml:A+", "red", ["v0"]],
+    ["a4988_ml:A-", "stepper_ml:A-", "black", ["v0"]],
+    ["a4988_ml:B+", "stepper_ml:B+", "green", ["v0"]],
+    ["a4988_ml:B-", "stepper_ml:B-", "blue", ["v0"]],
 
-    ["esp32:3", "led_motor_mr:A", "yellow", ["v0"]],
-    ["esp32:GND.1", "led_motor_mr:C", "black", ["v0"]],
+    ["esp32:40", "a4988_mr:STEP", "yellow", ["v0"]],
+    ["esp32:39", "a4988_mr:DIR", "yellow", ["v0"]],
+    ["esp32:3V3", "a4988_mr:VDD", "yellow", ["v0"]],
+    ["esp32:GND.1", "a4988_mr:GND", "black", ["v0"]],
+    ["a4988_mr:A+", "stepper_mr:A+", "red", ["v0"]],
+    ["a4988_mr:A-", "stepper_mr:A-", "black", ["v0"]],
+    ["a4988_mr:B+", "stepper_mr:B+", "green", ["v0"]],
+    ["a4988_mr:B-", "stepper_mr:B-", "blue", ["v0"]],
 
-    ["esp32:21", "led_motor_rl:A", "purple", ["v0"]],
-    ["esp32:GND.1", "led_motor_rl:C", "black", ["v0"]],
+    ["esp32:38", "a4988_rl:STEP", "purple", ["v0"]],
+    ["esp32:37", "a4988_rl:DIR", "purple", ["v0"]],
+    ["esp32:3V3", "a4988_rl:VDD", "purple", ["v0"]],
+    ["esp32:GND.1", "a4988_rl:GND", "black", ["v0"]],
+    ["a4988_rl:A+", "stepper_rl:A+", "red", ["v0"]],
+    ["a4988_rl:A-", "stepper_rl:A-", "black", ["v0"]],
+    ["a4988_rl:B+", "stepper_rl:B+", "green", ["v0"]],
+    ["a4988_rl:B-", "stepper_rl:B-", "blue", ["v0"]],
 
-    ["esp32:42", "led_motor_rr:A", "orange", ["v0"]],
-    ["esp32:GND.1", "led_motor_rr:C", "black", ["v0"]]
+    ["esp32:36", "a4988_rr:STEP", "orange", ["v0"]],
+    ["esp32:35", "a4988_rr:DIR", "orange", ["v0"]],
+    ["esp32:3V3", "a4988_rr:VDD", "orange", ["v0"]],
+    ["esp32:GND.1", "a4988_rr:GND", "black", ["v0"]],
+    ["a4988_rr:A+", "stepper_rr:A+", "red", ["v0"]],
+    ["a4988_rr:A-", "stepper_rr:A-", "black", ["v0"]],
+    ["a4988_rr:B+", "stepper_rr:B+", "green", ["v0"]],
+    ["a4988_rr:B-", "stepper_rr:B-", "blue", ["v0"]]
   ]
 }

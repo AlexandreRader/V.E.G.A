@@ -28,6 +28,7 @@ public:
     
     void resetMission();
     bool isDone() const;
+    int getCurrentIndex() const { return currentIndex; }
 
     /**
      * Calcule les vitesses V et W en fonction de la position actuelle.

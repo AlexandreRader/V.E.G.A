@@ -13,6 +13,7 @@
 
 
 #include <Arduino.h>
+#include <ESP32Servo.h>
 #ifdef WOKWI_SIMULATION
 #include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Test mission for simulation
 #else
@@ -28,22 +29,25 @@
 
 class SimulatedActuators {
 private:
-    const uint8_t LED_STATUS = 2; // OK
+    // Status LED indicator (GPIO 2) - blinks to show firmware is running
+    const uint8_t LED_STATUS = 2;
     
-    // On évite 18, 19 et 20 à tout prix
-    const uint8_t LED_SERVO_FL = 12;
-    const uint8_t LED_SERVO_FR = 13;
-    const uint8_t LED_SERVO_RL = 14;
-    const uint8_t LED_SERVO_RR = 15;
-
-    const uint8_t LED_MOTOR_FL = 16;
-    const uint8_t LED_MOTOR_FR = 17;
+    // Servo motors
+    Servo servoFL, servoFR, servoRL, servoRR;
     
-    // NOUVELLES BROCHES SÉCURISÉES POUR LE S3
-    const uint8_t LED_MOTOR_ML = 1; 
-    const uint8_t LED_MOTOR_MR = 3;
-    const uint8_t LED_MOTOR_RL = 21;
-    const uint8_t LED_MOTOR_RR = 42;
+    // Stepper motor pins (STEP, DIR) - matching pins.h
+    const uint8_t STEPPER_FL_STEP = 15;  // M1 Front Left
+    const uint8_t STEPPER_FL_DIR = 16;
+    const uint8_t STEPPER_FR_STEP = 17;  // M4 Front Right  
+    const uint8_t STEPPER_FR_DIR = 18;
+    const uint8_t STEPPER_ML_STEP = 42;  // M2 Middle Left
+    const uint8_t STEPPER_ML_DIR = 41;
+    const uint8_t STEPPER_MR_STEP = 40;  // M5 Middle Right
+    const uint8_t STEPPER_MR_DIR = 39;
+    const uint8_t STEPPER_RL_STEP = 38;  // M3 Rear Left
+    const uint8_t STEPPER_RL_DIR = 37;
+    const uint8_t STEPPER_RR_STEP = 36;  // M6 Rear Right
+    const uint8_t STEPPER_RR_DIR = 35;
 
 public:
     void begin() {
@@ -51,18 +55,25 @@ public:
         pinMode(LED_STATUS, OUTPUT);
         digitalWrite(LED_STATUS, LOW);
         
-        // Initialize LED pins
-        pinMode(LED_SERVO_FL, OUTPUT);
-        pinMode(LED_SERVO_FR, OUTPUT);
-        pinMode(LED_SERVO_RL, OUTPUT);
-        pinMode(LED_SERVO_RR, OUTPUT);
-
-        pinMode(LED_MOTOR_FL, OUTPUT);
-        pinMode(LED_MOTOR_FR, OUTPUT);
-        pinMode(LED_MOTOR_ML, OUTPUT);
-        pinMode(LED_MOTOR_MR, OUTPUT);
-        pinMode(LED_MOTOR_RL, OUTPUT);
-        pinMode(LED_MOTOR_RR, OUTPUT);
+        // Attach servo motors
+        servoFL.attach(12);
+        servoFR.attach(13);
+        servoRL.attach(14);
+        servoRR.attach(11);
+        
+        // Initialize stepper motor pins
+        pinMode(STEPPER_FL_STEP, OUTPUT);
+        pinMode(STEPPER_FL_DIR, OUTPUT);
+        pinMode(STEPPER_FR_STEP, OUTPUT);
+        pinMode(STEPPER_FR_DIR, OUTPUT);
+        pinMode(STEPPER_ML_STEP, OUTPUT);
+        pinMode(STEPPER_ML_DIR, OUTPUT);
+        pinMode(STEPPER_MR_STEP, OUTPUT);
+        pinMode(STEPPER_MR_DIR, OUTPUT);
+        pinMode(STEPPER_RL_STEP, OUTPUT);
+        pinMode(STEPPER_RL_DIR, OUTPUT);
+        pinMode(STEPPER_RR_STEP, OUTPUT);
+        pinMode(STEPPER_RR_DIR, OUTPUT);
 
         Serial.println("Simulated actuators initialized");
     }
@@ -79,18 +90,24 @@ public:
         }
     }
 
-    // Simulate servo control with LED brightness
+    // Control servo motors
     void setServoAngles(float fl, float fr, float rl, float rr) {
-        // Convert angles to LED brightness (0-255)
-        int bright_fl = map(abs(fl) * 180/PI, 0, 45, 0, 255);
-        int bright_fr = map(abs(fr) * 180/PI, 0, 45, 0, 255);
-        int bright_rl = map(abs(rl) * 180/PI, 0, 45, 0, 255);
-        int bright_rr = map(abs(rr) * 180/PI, 0, 45, 0, 255);
-
-        analogWrite(LED_SERVO_FL, bright_fl);
-        analogWrite(LED_SERVO_FR, bright_fr);
-        analogWrite(LED_SERVO_RL, bright_rl);
-        analogWrite(LED_SERVO_RR, bright_rr);
+        // Convert radians to degrees and center at 90° (neutral position)
+        int angle_fl = 90 + (fl * 180/PI);
+        int angle_fr = 90 + (fr * 180/PI);
+        int angle_rl = 90 + (rl * 180/PI);
+        int angle_rr = 90 + (rr * 180/PI);
+        
+        // Constrain to servo range (0-180°)
+        angle_fl = constrain(angle_fl, 0, 180);
+        angle_fr = constrain(angle_fr, 0, 180);
+        angle_rl = constrain(angle_rl, 0, 180);
+        angle_rr = constrain(angle_rr, 0, 180);
+        
+        servoFL.write(angle_fl);
+        servoFR.write(angle_fr);
+        servoRL.write(angle_rl);
+        servoRR.write(angle_rr);
 
         Serial.print("SERVO ANGLES FL:");
         Serial.print(fl * 180/PI, 1);
@@ -103,44 +120,54 @@ public:
         Serial.println("°");
     }
 
-    // Simulate stepper control with LED blinking
+    // Control stepper motors with A4988 drivers
     void setStepperSpeeds(float fl, float fr, float ml, float mr, float rl, float rr) {
-        // Convert Hz to blink delay (higher speed = faster blink)
-        int delay_fl = fl > 0 ? max(50, 1000/(int)fl) : 1000;
-        int delay_fr = fr > 0 ? max(50, 1000/(int)fr) : 1000;
-        int delay_ml = ml > 0 ? max(50, 1000/(int)ml) : 1000;
-        int delay_mr = mr > 0 ? max(50, 1000/(int)mr) : 1000;
-        int delay_rl = rl > 0 ? max(50, 1000/(int)rl) : 1000;
-        int delay_rr = rr > 0 ? max(50, 1000/(int)rr) : 1000;
+        // Set directions (positive speed = forward)
+        digitalWrite(STEPPER_FL_DIR, fl >= 0 ? HIGH : LOW);
+        digitalWrite(STEPPER_FR_DIR, fr >= 0 ? HIGH : LOW);
+        digitalWrite(STEPPER_ML_DIR, ml >= 0 ? HIGH : LOW);
+        digitalWrite(STEPPER_MR_DIR, mr >= 0 ? HIGH : LOW);
+        digitalWrite(STEPPER_RL_DIR, rl >= 0 ? HIGH : LOW);
+        digitalWrite(STEPPER_RR_DIR, rr >= 0 ? HIGH : LOW);
+        
+        // Generate step pulses based on frequency
+        generateStepPulse(STEPPER_FL_STEP, abs(fl));
+        generateStepPulse(STEPPER_FR_STEP, abs(fr));
+        generateStepPulse(STEPPER_ML_STEP, abs(ml));
+        generateStepPulse(STEPPER_MR_STEP, abs(mr));
+        generateStepPulse(STEPPER_RL_STEP, abs(rl));
+        generateStepPulse(STEPPER_RR_STEP, abs(rr));
 
-        // Simple LED state toggle for simulation
-        static bool state = false;
-        static unsigned long last_toggle = 0;
-
-        if (millis() - last_toggle > 200) {
-            state = !state;
-            digitalWrite(LED_MOTOR_FL, state && fl > 0);
-            digitalWrite(LED_MOTOR_FR, state && fr > 0);
-            digitalWrite(LED_MOTOR_ML, state && ml > 0);
-            digitalWrite(LED_MOTOR_MR, state && mr > 0);
-            digitalWrite(LED_MOTOR_RL, state && rl > 0);
-            digitalWrite(LED_MOTOR_RR, state && rr > 0);
-            last_toggle = millis();
+        Serial.printf("STEPPER SPEEDS -> FL:%.0fHz, FR:%.0fHz, ML:%.0fHz, MR:%.0fHz, RL:%.0fHz, RR:%.0fHz\n",
+                      fl, fr, ml, mr, rl, rr);
+    }
+    
+private:
+    // Generate step pulses for A4988 stepper driver
+    void generateStepPulse(uint8_t stepPin, float frequency) {
+        if (frequency <= 0) return;
+        
+        static unsigned long lastSteps[6] = {0, 0, 0, 0, 0, 0};
+        static int stepIndex = 0;
+        
+        // Map pins to indices
+        int idx = -1;
+        if (stepPin == STEPPER_FL_STEP) idx = 0;
+        else if (stepPin == STEPPER_FR_STEP) idx = 1;
+        else if (stepPin == STEPPER_ML_STEP) idx = 2;
+        else if (stepPin == STEPPER_MR_STEP) idx = 3;
+        else if (stepPin == STEPPER_RL_STEP) idx = 4;
+        else if (stepPin == STEPPER_RR_STEP) idx = 5;
+        
+        if (idx == -1) return;
+        
+        unsigned long period_us = (unsigned long)(1000000.0 / frequency);
+        if (micros() - lastSteps[idx] >= period_us) {
+            digitalWrite(stepPin, HIGH);
+            delayMicroseconds(1); // Very short pulse
+            digitalWrite(stepPin, LOW);
+            lastSteps[idx] = micros();
         }
-
-        Serial.print("STEPPER SPEEDS FL:");
-        Serial.print(fl, 0);
-        Serial.print("Hz FR:");
-        Serial.print(fr, 0);
-        Serial.print("Hz ML:");
-        Serial.print(ml, 0);
-        Serial.print("Hz MR:");
-        Serial.print(mr, 0);
-        Serial.print("Hz RL:");
-        Serial.print(rl, 0);
-        Serial.print("Hz RR:");
-        Serial.print(rr, 0);
-        Serial.println("Hz");
     }
 };
 
@@ -327,18 +354,6 @@ void runSimulationStep() {
     // Status output (every 500ms)
     static unsigned long last_status = 0;
     if (now - last_status > 500) {
-        int current_waypoint = follower->isDone() ? PATH_SIZE - 1 : 0;
-        for (int i = 0; i < PATH_SIZE - 1; i++) {
-            float dx = MISSION_PATH[i+1].x - MISSION_PATH[i].x;
-            float dy = MISSION_PATH[i+1].y - MISSION_PATH[i].y;
-            float dist_to_start = sqrt(pow(robot_x - MISSION_PATH[i].x, 2) + pow(robot_y - MISSION_PATH[i].y, 2));
-            float segment_length = sqrt(dx*dx + dy*dy);
-            if (dist_to_start < segment_length) {
-                current_waypoint = i;
-                break;
-            }
-        }
-
         Serial.print("POS [X:");
         Serial.print(robot_x, 2);
         Serial.print(" Y:");
@@ -348,9 +363,9 @@ void runSimulationStep() {
         Serial.print("° V:");
         Serial.print(current_v, 2);
         Serial.print(" W:");
-        Serial.print(current_w, 2);
+        Serial.print(current_w, 4);  // More precision for angular velocity
         Serial.print(" WP:");
-        Serial.print(current_waypoint + 1);
+        Serial.print(follower->getCurrentIndex() + 1);
         Serial.print("/");
         Serial.print(PATH_SIZE);
         Serial.print(" TIME:");
@@ -371,37 +386,3 @@ void printStatus() {
 }
 
 
-
-/*
-
-#include <Arduino.h>
-
-// On teste uniquement la LED blanche sur le GPIO 2
-const uint8_t LED_TEST = 2;
-
-void setup() {
-    // Initialisation du Serial (indispensable pour l'USB du S3)
-    Serial.begin(115200);
-    
-    // Attente pour que le port série se réveille sur le PC/Wokwi
-    uint32_t start = millis();
-    while (!Serial && (millis() - start) < 3000); 
-
-    Serial.println("\n*********************************");
-    Serial.println("VEGA SC317 - TEST MINIMAL LED");
-    Serial.println("*********************************");
-
-    pinMode(LED_TEST, OUTPUT);
-    Serial.println("GPIO 2 configuré en SORTIE");
-}
-
-void loop() {
-    Serial.println("LED ON...");
-    digitalWrite(LED_TEST, HIGH);
-    delay(500);
-
-    Serial.println("LED OFF");
-    digitalWrite(LED_TEST, LOW);
-    delay(500);
-}
-*/
