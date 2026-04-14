@@ -1,3 +1,5 @@
+import queue
+
 import cv2
 import numpy as np
 import tkinter as tk
@@ -7,13 +9,16 @@ import os
 import glob
 import heapq # Ajout pour l'algorithme A*
 
+
+
+
 # --- CONFIGURATION PHYSIQUE DE LA PISTE ---
 MAP_WIDTH_M = 4.0   
 MAP_HEIGHT_M = 6.0  
 CELL_SIZE_CM = 10.0 
 
 # --- CONFIGURATION CALIBRATION ---
-CHESSBOARD_SIZE = (9, 6)    # coins intérieurs du motif de calibration
+CHESSBOARD_SIZE = (7, 7)    # coins intérieurs du motif de calibration
 SQUARE_SIZE = 1.0           # taille arbitraire des cases, unité relative
 
 # --- CONFIGURATION TRAITEMENT ---
@@ -154,6 +159,7 @@ class CostmapApp:
 
     def calibrate_camera(self):
         image_paths = list(filedialog.askopenfilenames(title="Sélectionner images de calibration", filetypes=[("Images", "*.jpg *.jpeg *.png *.JPG *.JPEG *.PNG")]))
+        folder = None
         if not image_paths:
             folder = filedialog.askdirectory(title="Choisir dossier images de calibration")
             if not folder:
@@ -166,6 +172,9 @@ class CostmapApp:
                 glob.glob(os.path.join(folder, "*.JPEG")) +
                 glob.glob(os.path.join(folder, "*.PNG"))
             )
+        elif image_paths:
+            # If individual files were selected, use the directory of the first file
+            folder = os.path.dirname(image_paths[0])
 
         if len(image_paths) < 3:
             messagebox.showerror("Erreur", f"Au moins 3 images de calibration sont nécessaires. Images trouvées : {len(image_paths)}")
@@ -187,13 +196,21 @@ class CostmapApp:
             if img is None:
                 continue
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            found, corners = cv2.findChessboardCorners(gray, pattern, None)
+            found, corners = cv2.findChessboardCorners(gray, pattern, 
+                flags=cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK)
             if found:
                 valid_images += 1
                 corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
                                             criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
                 objpoints.append(objp)
                 imgpoints.append(corners2)
+                
+                # VISUALISATION : Créer une fenêtre pour voir la détection
+                debug_img = img.copy()
+                cv2.drawChessboardCorners(debug_img, pattern, corners2, found)
+                cv2.imshow(f"Detection - {os.path.basename(path)}", cv2.resize(debug_img, (800, 600)))
+                cv2.waitKey(500) # Attend 0.5s par image
+
                 if first_valid_img is None:
                     first_valid_img = cv2.drawChessboardCorners(img.copy(), pattern, corners2, found)
                 last_valid_img = cv2.drawChessboardCorners(img.copy(), pattern, corners2, found)
@@ -296,11 +313,18 @@ class CostmapApp:
         if len(self.points_source) != 4: return
         pts = np.array(self.points_source, dtype="float32")
         rect_ordered = self.order_points(pts)
+        
         dest_w, dest_h = int(MAP_WIDTH_M * 100), int(MAP_HEIGHT_M * 100)
         points_dest = np.float32([[0, 0], [dest_w - 1, 0], [dest_w - 1, dest_h - 1], [0, dest_h - 1]])
+        
+        # --- CORRECTION ICI ---
+        # On récupère l'image sans distorsion AVANT de calculer la perspective
         src_img = self.get_display_image(self.original_img)
+        
         matrix = cv2.getPerspectiveTransform(rect_ordered, points_dest)
         self.warped_img = cv2.warpPerspective(src_img, matrix, (dest_w, dest_h))
+        
+        # Mise à jour de l'affichage
         img_disp = self.fit_image_to_box(self.warped_img)
         self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB))) 
         self.canvas_orig.delete("all")
@@ -351,54 +375,105 @@ class CostmapApp:
             messagebox.showwarning("Erreur", "Générez la map et placez A et B.")
             return
         
-        self.lbl_status.config(text="Calcul en cours...")
+        self.lbl_status.config(text="Calcul cinématique optimisé en cours...")
         self.root.update()
 
-        start, goal = self.start_pos, self.end_pos
-        queue = [(0, start)]
-        came_from = {start: None}
-        cost_so_far = {start: 0}
+        # --- Configuration Cinématique ---
+        L_AXE_M = 0.20    # Tiré de Kinematics.h
+        ARC_STEP_M = 0.30 # Longueur de chaque segment de courbe
+        MAX_STEER = np.radians(35) # Angle max des servos
+        
+        # --- Paramètres de discrétisation (pour la performance) ---
+        XY_RES = 0.15     # On regroupe les positions par blocs de 15cm
+        THETA_RES = np.radians(15) # On regroupe les angles par blocs de 15°
+
+        def to_world(pos):
+            return (pos[0] * CELL_SIZE_CM / 100.0, pos[1] * CELL_SIZE_CM / 100.0)
+
+        start_w = to_world(self.start_pos)
+        goal_w = to_world(self.end_pos)
+
+        # État initial : (x, y, theta)
+        start_state = (start_w[0], start_w[1], 0.0)
+        
+        # queue = [(priorité, (x, y, theta))]
+        queue = [(0, start_state)]
+        came_from = {start_state: None}
+        cost_so_far = {start_state: 0}
+        
+        # On utilise un set pour suivre les états déjà "fermés" via la clé discrétisée
+        closed_states = set()
+
+        found_goal = None
 
         while queue:
-            current_priority, current = heapq.heappop(queue)
-            if current == goal: break
+            _, current = heapq.heappop(queue)
+            curr_x, curr_y, curr_theta = current
 
-            # Mouvements en 8 directions
-            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0),(1,1),(1,-1),(-1,1),(-1,-1)]:
-                next_node = (current[0]+dx, current[1]+dy)
-                
-                # Si on reste dans la carte
-                if 0 <= next_node[0] < GRID_W and 0 <= next_node[1] < GRID_H:
-                    weight = self.costmap_grid[next_node[1], next_node[0]]
-                    
-                    if weight >= 254: continue # Mur mortel
-                    
-                    # Le coût d'un pas (diagonale = 1.4, droit = 1) + la pénalité de la carte
-                    step_cost = 1.4 if abs(dx)+abs(dy)==2 else 1
-                    new_cost = cost_so_far[current] + step_cost + (weight * 2.0)
-                    
-                    if next_node not in cost_so_far or new_cost < cost_so_far[next_node]:
-                        cost_so_far[next_node] = new_cost
-                        # Heuristique : Distance de Manhattan
-                        priority = new_cost + abs(goal[0]-next_node[0]) + abs(goal[1]-next_node[1])
-                        heapq.heappush(queue, (priority, next_node))
-                        came_from[next_node] = current
+            # 1. Condition de succès (tolérance de 30cm)
+            dist_to_goal = np.sqrt((curr_x - goal_w[0])**2 + (curr_y - goal_w[1])**2)
+            if dist_to_goal < 0.35:
+                found_goal = current
+                break
 
-        # Reconstruction de la trajectoire
-        if goal not in came_from:
-            messagebox.showerror("Bloqué", "Aucun chemin possible trouvé !")
+            # Discrétisation de l'état actuel pour éviter les doublons
+            state_key = (round(curr_x / XY_RES), round(curr_y / XY_RES), round(curr_theta / THETA_RES))
+            if state_key in closed_states:
+                continue
+            closed_states.add(state_key)
+
+            # 2. Simulation des commandes (5 directions de braquage)
+            for steer in np.linspace(-MAX_STEER, MAX_STEER, 5):
+                if abs(steer) < 0.01: # Ligne droite
+                    next_x = curr_x + ARC_STEP_M * np.cos(curr_theta)
+                    next_y = curr_y + ARC_STEP_M * np.sin(curr_theta)
+                    next_theta = curr_theta
+                else: # Modèle ICR
+                    R = L_AXE_M / np.tan(steer)
+                    d_theta = ARC_STEP_M / R
+                    next_theta = curr_theta + d_theta
+                    next_x = curr_x + R * (np.sin(next_theta) - np.sin(curr_theta))
+                    next_y = curr_y - R * (np.cos(next_theta) - np.cos(curr_theta))
+
+                # Vérification des limites et collisions
+                gx = int((next_x * 100.0) / CELL_SIZE_CM)
+                gy = int((next_y * 100.0) / CELL_SIZE_CM)
+
+                if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+                    weight = self.costmap_grid[gy, gx]
+                    if weight >= 250: continue # Obstacle détecté
+
+                    next_state = (next_x, next_y, next_theta)
+                    
+                    # Coût = distance + pénalité de proximité d'obstacle
+                    # On ajoute une petite pénalité au braquage pour favoriser les lignes droites
+                    steering_penalty = abs(steer) * 0.1
+                    new_cost = cost_so_far[current] + ARC_STEP_M + (weight / 50.0) + steering_penalty
+                    
+                    if next_state not in cost_so_far or new_cost < cost_so_far[next_state]:
+                        cost_so_far[next_state] = new_cost
+                        # Heuristique : Distance Euclidienne
+                        priority = new_cost + np.sqrt((next_x - goal_w[0])**2 + (next_y - goal_w[1])**2)
+                        heapq.heappush(queue, (priority, next_state))
+                        came_from[next_state] = current
+
+        # 3. Reconstruction et affichage
+        if not found_goal:
+            messagebox.showerror("Échec", "Aucun chemin cinématiquement possible.")
             self.lbl_status.config(text="Échec du Pathfinding.")
             return
 
         path = []
-        curr = goal
+        curr = found_goal
         while curr is not None:
-            path.append(curr)
+            gx = int((curr[0] * 100.0) / CELL_SIZE_CM)
+            gy = int((curr[1] * 100.0) / CELL_SIZE_CM)
+            path.append((gx, gy))
             curr = came_from.get(curr)
         
-        self.current_path = path[::-1] # Inverser pour aller de A vers B
+        self.current_path = path[::-1]
         self.update_costmap_canvas()
-        self.lbl_status.config(text=f"Succès ! Trajectoire trouvée ({len(self.current_path)} points).")
+        self.lbl_status.config(text=f"Succès ! Trajectoire trouvée en {len(self.current_path)} segments.")
 
     # === UPDATE CANVAS (Modifié pour afficher la trajectoire) ===
     def update_costmap_canvas(self):
