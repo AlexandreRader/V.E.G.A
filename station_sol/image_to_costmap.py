@@ -285,50 +285,112 @@ class CostmapApp:
 
     def on_canvas_orig_click(self, event):
         if self.original_img is None: return
+        
+        # --- Calcul de l'échelle et des offsets pour correspondre à l'affichage ---
         h_real, w_real = self.original_img.shape[:2]
         scale = 500 / max(h_real, w_real)
         disp_w, disp_h = int(w_real * scale), int(h_real * scale)
         offset_x, offset_y = (500 - disp_w) // 2, (500 - disp_h) // 2
-        if event.x < offset_x or event.x > offset_x + disp_w or event.y < offset_y or event.y > offset_y + disp_h: return
+        
+        # Vérifier que le clic est bien dans l'image affichée
+        if event.x < offset_x or event.x > offset_x + disp_w or event.y < offset_y or event.y > offset_y + disp_h: 
+            return
+            
+        # Conversion des coordonnées écran vers coordonnées réelles de l'image
         real_x, real_y = int((event.x - offset_x) / scale), int((event.y - offset_y) / scale)
+        
         if len(self.points_source) < 4:
+            # Index du point actuel (1 à 4)
+            idx = len(self.points_source) + 1
+            
+            # Stockage des points
             self.points_source.append([real_x, real_y])
             self.canvas_points.append((event.x, event.y))
+            
+            # --- Dessin visuel sur le Canvas ---
             r = 4
-            self.canvas_orig.create_oval(event.x-r, event.y-r, event.x+r, event.y+r, fill="yellow", outline="black")
+            # Dessiner le point
+            color = "#FF0000" # Rouge pour une meilleure visibilité
+            self.canvas_orig.create_oval(event.x-r, event.y-r, event.x+r, event.y+r, 
+                                         fill=color, outline="white", width=2)
+            
+            # Ajouter le numéro de l'ordre de clic à côté du point
+            self.canvas_orig.create_text(event.x + 12, event.y - 12, text=str(idx), 
+                                         fill=color, font=("Arial", 11, "bold"))
+            
+            # Dessiner les lignes de liaison entre les points
             if len(self.canvas_points) > 1:
-                self.canvas_orig.create_line(self.canvas_points[-2][0], self.canvas_points[-2][1], event.x, event.y, fill="yellow", dash=(4,2))
+                self.canvas_orig.create_line(self.canvas_points[-2][0], self.canvas_points[-2][1], 
+                                             event.x, event.y, fill="yellow", dash=(4,2))
+            
+            # Fermer le rectangle quand le 4ème point est placé
             if len(self.canvas_points) == 4:
-                self.canvas_orig.create_line(event.x, event.y, self.canvas_points[0][0], self.canvas_points[0][1], fill="yellow", dash=(4,2))
+                self.canvas_orig.create_line(event.x, event.y, self.canvas_points[0][0], 
+                                             self.canvas_points[0][1], fill="yellow", dash=(4,2))
+                self.lbl_status.config(text="4 points placés. Prêt pour le redressement.")
 
     def order_points(self, pts):
+        """
+        Ordonne les points selon la convention : 
+        [Haut-Gauche, Haut-Droite, Bas-Droite, Bas-Gauche]
+        Source : https://theailearner.com/2020/11/06/perspective-transformation/
+        """
         rect = np.zeros((4, 2), dtype="float32")
+
+        # Haut-Gauche a la somme (x+y) minimale
+        # Bas-Droite a la somme (x+y) maximale
         s = pts.sum(axis=1)
-        rect[0], rect[2] = pts[np.argmin(s)], pts[np.argmax(s)] 
+        rect[0] = pts[np.argmin(s)]
+        rect[2] = pts[np.argmax(s)]
+
+        # Haut-Droite a la différence (y-x) minimale (ou x-y maximale)
+        # Bas-Gauche a la différence (y-x) maximale (ou x-y minimale)
         diff = np.diff(pts, axis=1)
-        rect[1], rect[3] = pts[np.argmin(diff)], pts[np.argmax(diff)] 
+        rect[1] = pts[np.argmin(diff)]
+        rect[3] = pts[np.argmax(diff)]
+
         return rect
 
     def correct_perspective(self):
-        if len(self.points_source) != 4: return
-        pts = np.array(self.points_source, dtype="float32")
-        rect_ordered = self.order_points(pts)
-        
-        dest_w, dest_h = int(MAP_WIDTH_M * 100), int(MAP_HEIGHT_M * 100)
-        points_dest = np.float32([[0, 0], [dest_w - 1, 0], [dest_w - 1, dest_h - 1], [0, dest_h - 1]])
-        
-        # --- CORRECTION ICI ---
-        # On récupère l'image sans distorsion AVANT de calculer la perspective
+        """
+        Applique la transformation de perspective avec un ordre de clic FIXE :
+        1. Bas à Gauche | 2. Haut à Gauche | 3. Haut à Droite | 4. Bas à Droite
+        """
+        if len(self.points_source) != 4:
+            messagebox.showwarning("Points manquants", "Veuillez cliquer sur les 4 points dans cet ordre :\n1. Bas-Gauche\n2. Haut-Gauche\n3. Haut-Droite\n4. Bas-Droite")
+            return
+
+        # On utilise directement les points dans l'ordre du clic
+        rect_ordered = np.array(self.points_source, dtype="float32")
+
+        # Dimensions de la carte (4m x 6m -> 400px x 600px)
+        dest_w = int(MAP_WIDTH_M * 100)
+        dest_h = int(MAP_HEIGHT_M * 100)
+
+        # Points de destination correspondants à l'ordre demandé :
+        # 1. Bas-Gauche (0, dest_h)
+        # 2. Haut-Gauche (0, 0)
+        # 3. Haut-Droite (dest_w, 0)
+        # 4. Bas-Droite (dest_w, dest_h)
+        points_dest = np.float32([
+            [0, dest_h - 1],
+            [0, 0],
+            [dest_w - 1, 0],
+            [dest_w - 1, dest_h - 1]
+        ])
+
+        # Calcul de la matrice et application
         src_img = self.get_display_image(self.original_img)
-        
         matrix = cv2.getPerspectiveTransform(rect_ordered, points_dest)
         self.warped_img = cv2.warpPerspective(src_img, matrix, (dest_w, dest_h))
-        
-        # Mise à jour de l'affichage
+
+        # Mise à jour UI
         img_disp = self.fit_image_to_box(self.warped_img)
-        self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB))) 
+        self.photo_orig = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(img_disp, cv2.COLOR_BGR2RGB)))
         self.canvas_orig.delete("all")
         self.canvas_orig.create_image(250, 250, image=self.photo_orig, anchor=tk.CENTER)
+        
+        self.lbl_status.config(text="Perspective redressée (Ordre fixe : BG, HG, HD, BD)")
 
     def process_image(self):
         if self.warped_img is None: return
