@@ -29,7 +29,7 @@ private:
     ActuatorManager actuators;
     ToFManager tof_sensors;
     IRDockingSensor ir_sensor;
-    NRF24L01_Receiver nrf_receiver;
+    
 
     // État du robot
     RobotState current_state;
@@ -57,13 +57,7 @@ public:
 
         bool success = true;
 
-        // 1. Communication NRF24L01
-        if (!nrf_receiver.begin()) {
-            Serial.println("❌ NRF24L01: ÉCHEC");
-            success = false;
-        } else {
-            Serial.println("✅ NRF24L01: OK");
-        }
+        
 
         // 2. Capteurs ToF
         if (!tof_sensors.begin()) {
@@ -121,8 +115,7 @@ public:
         // 1. Mise à jour des capteurs
         updateSensors();
 
-        // 2. Traitement des messages NRF24L01
-        processCommunications();
+        
 
         // 3. Mise à jour de l'état du robot
         updateRobotState(dt);
@@ -133,8 +126,7 @@ public:
         // 5. Application des commandes aux actionneurs
         applyActuatorCommands();
 
-        // 6. Télémétrie périodique
-        sendTelemetry(now);
+      
     }
 
     // Mise à jour des capteurs
@@ -143,39 +135,7 @@ public:
         ir_sensor.isTargetDetected();  // Mise à jour automatique
     }
 
-    // Traitement des communications
-    void processCommunications() {
-        // Vérification des messages texte
-        String message;
-        if (nrf_receiver.readString(message)) {
-            handleTextCommand(message);
-        }
-
-        // Vérification des données de position
-        float coords[3];
-        if (nrf_receiver.readFloatArray(coords, 3)) {
-            // Mise à jour de la position cible ou correction
-            Serial.printf("Coordonnées reçues: %.2f, %.2f, %.2f\n", coords[0], coords[1], coords[2]);
-        }
-    }
-
-    // Gestion des commandes texte
-    void handleTextCommand(const String& cmd) {
-        Serial.printf("Commande reçue: %s\n", cmd.c_str());
-
-        if (cmd == "START") {
-            startMission();
-        } else if (cmd == "STOP") {
-            stopMission();
-        } else if (cmd == "RESET") {
-            resetSystem();
-        } else if (cmd.startsWith("POS:")) {
-            // Mise à jour de position depuis la station
-            float x, y, theta;
-            sscanf(cmd.c_str() + 4, "%f,%f,%f", &x, &y, &theta);
-            setInitialPosition(x, y, theta);
-        }
-    }
+  
 
     // Mise à jour de l'état du robot
     void updateRobotState(float dt) {
@@ -366,17 +326,7 @@ public:
         }
     }
 
-    // Envoi de télémétrie
-    void sendTelemetry(unsigned long now) {
-        if (now - last_telemetry > 1000) {  // Toutes les secondes
-            // Envoi de la position actuelle
-            char telemetry[32];
-            sprintf(telemetry, "POS:%.2f,%.2f,%.2f", robot_x, robot_y, robot_theta);
-            nrf_receiver.sendResponse(telemetry);
 
-            last_telemetry = now;
-        }
-    }
 
     // Getters pour diagnostic
     RobotState getCurrentState() const { return current_state; }

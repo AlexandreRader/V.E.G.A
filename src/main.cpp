@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include "mission_export.h" // Généré par ta Station Sol
+#include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Généré par ta Station Sol
 #include "../lib/Navigation/Navigation.h"     // Contrôleur principal intégré
-
+#include "NRF.h"
 // ==========================================
 // SYSTÈME INTÉGRÉ VEGA SC317
 // ==========================================
@@ -98,5 +98,25 @@ void processSerialCommand(String cmd) {
         Serial.println("  help   - Cette aide");
     } else {
         Serial.printf("Commande inconnue: %s\n", cmd.c_str());
+    }
+}
+
+// ==========================================
+// TRAITEMENT DE LA COMMUNICATION
+// ==========================================
+
+
+NRF_Comm nrf;
+QueueHandle_t xCmdQueue;  // Queue FreeRTOS vers TaskNavigation
+
+void TaskComms(void* pvParameters) {
+    nrf.begin();
+    for (;;) {
+        nrf.update();
+        while (nrf.hasCommand()) {
+            String cmd = nrf.readCommand();
+            xQueueSend(xCmdQueue, &cmd, 0);  // → TaskNavigation
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

@@ -25,7 +25,7 @@
 #define PIN_TOF_4_DROITE  9
 
 // --- PROPULSION (Steppers M1 à M6) ---
-#define PIN_ENABLE_MOTORS 14
+#define PIN_ENABLE_MOTORS 47
 // Moteur 1 (Avant Gauche)
 #define PIN_STEP_M1 15
 #define PIN_DIR_M1  16
