@@ -47,7 +47,7 @@ private:
 
 public:
     NavigationController()
-        : ir_sensor(PIN_IR_DOCKING), current_state(STATE_IDLE),
+        : ir_sensor(PIN_IR_OUT), current_state(STATE_IDLE),
           robot_x(0), robot_y(0), robot_theta(0),
           current_v(0), current_w(0), last_update(0), last_telemetry(0) {}
 

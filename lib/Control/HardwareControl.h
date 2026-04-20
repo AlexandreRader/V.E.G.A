@@ -150,10 +150,10 @@ public:
         uint16_t pulse_rr = map(angle_rr, 0, 180, SERVO_MIN, SERVO_MAX);
 
         // Envoi aux servos
-        pwm.setPWM(0, 0, pulse_fl);  // Servo FL sur canal 0
-        pwm.setPWM(1, 0, pulse_fr);  // Servo FR sur canal 1
-        pwm.setPWM(2, 0, pulse_rl);  // Servo RL sur canal 2
-        pwm.setPWM(3, 0, pulse_rr);  // Servo RR sur canal 3
+        pwm.setPWM(1, 0, pulse_fl);  // Servo FL sur canal 0
+        pwm.setPWM(2, 0, pulse_fr);  // Servo FR sur canal 1
+        pwm.setPWM(3, 0, pulse_rl);  // Servo RL sur canal 2
+        pwm.setPWM(4, 0, pulse_rr);  // Servo RR sur canal 3
     }
 
     // Contrôle des steppers (vitesses en Hz)

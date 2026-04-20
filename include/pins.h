@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 // ==========================================
-// MAPPING ESP32-S3 - ROVER VEGA SC317
+// MAPPING ESP32-S3 - ROVER VEGA SC317 (N8R8)
 // ==========================================
 
 // --- BUS I2C (Centrales, Servos, ToF) ---
@@ -26,13 +26,14 @@
 
 // --- PROPULSION (Steppers M1 à M6) ---
 #define PIN_ENABLE_MOTORS 47
+
 // Moteur 1 (Avant Gauche)
-#define PIN_STEP_M1 15
-#define PIN_DIR_M1  16
+#define PIN_STEP_M1 2
+#define PIN_DIR_M1  1
 
 // Moteur 2 (Milieu Gauche)
-#define PIN_STEP_M2 17
-#define PIN_DIR_M2  18
+#define PIN_STEP_M2 38
+#define PIN_DIR_M2  21
 
 // Moteur 3 (Arrière Gauche)
 #define PIN_STEP_M3 42
@@ -43,22 +44,19 @@
 #define PIN_DIR_M4  39
 
 // Moteur 5 (Milieu Droit)
-#define PIN_STEP_M5 38
-#define PIN_DIR_M5  37
+#define PIN_STEP_M5 17
+#define PIN_DIR_M5  18
 
 // Moteur 6 (Arrière Droit)
-#define PIN_STEP_M6 36
-#define PIN_DIR_M6  35
+#define PIN_STEP_M6 15
+#define PIN_DIR_M6  16
 
-// --- COMMUNICATION SERIE (TMC2208) ---
+// --- COMMUNICATION SERIE (Console / Debug) ---
 #define PIN_UART_RX 44
 #define PIN_UART_TX 43
 
-// --- CAPTEUR IR DOCKING ---
-#define PIN_IR_DOCKING 34
-#define PIN_DIR_M6  35
-
-// --- CAPTEURS DIVERS ---
-#define PIN_IR_SENSOR 21
+// --- CAPTEURS INFRAROUGES ---
+#define PIN_IR_OUT    48   // Lecture du signal Infrarouge (Retour booléen)
+#define PIN_IR_ENABLE 3    // (Optionnel) Pin d'activation du capteur IR
 
 #endif // PINS_H
