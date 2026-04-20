@@ -1,16 +1,12 @@
 #include <Arduino.h>
 #include <Wire.h>
-//#include <Adafruit_PWMServoDriver.h> // Ajout de la bibliothèque PCA9685
 #include "pins.h"
 #include "IMUManager.h" 
-//#include "HardwareControl.h"
+#include "HardwareControl.h"
 
 IMUManager imu;
 bool imu_ok = false;
-//ActuatorManager actuators;
-
-// Instanciation du driver PCA9685 (Adresse par défaut = 0x40)
-//Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x7F);
+ActuatorManager actuators;
 
 
 
@@ -24,7 +20,7 @@ void afficherMenu() {
     Serial.println("4 : Activer/Désactiver les moteurs (Pin 47)");
     Serial.println("5 : Faire un pas avec le Moteur 1");
     Serial.println("6 : Lire la Centrale Inertielle (IMU)");
-    Serial.println("7 : Tester le Servo 1 (PCA9685 - Canal 0)");
+    Serial.println("7 : Tester les Servos (Balayage)");
     Serial.println("8 : Afficher le statut des Actionneurs");
     Serial.println("==========================================");
 }
@@ -33,16 +29,16 @@ void setup() {
     Serial.begin(115200);
     delay(2000); 
 
-    Serial.println("\n\nInitialisation des broches de test...");
+    Serial.println("\n\nInitialisation du système VEGA...");
 
+    // 1. Initialisation du bus I2C (Unique pour tout le monde)
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     
-    //pinMode(PIN_IR_OUT, INPUT);
-    //pinMode(PIN_ENABLE_MOTORS, OUTPUT);
-    //digitalWrite(PIN_ENABLE_MOTORS, HIGH); 
-    //pinMode(PIN_STEP_M1, OUTPUT);
-    //pinMode(PIN_DIR_M1, OUTPUT);
+    // 2. Configuration des pins directs
+    pinMode(PIN_IR_OUT, INPUT);
 
+
+    // 3. Initialisation de l'IMU
     Serial.println("Initialisation de l'IMU...");
     if (imu.begin()) {
         imu_ok = true;
@@ -51,11 +47,14 @@ void setup() {
         Serial.println("⚠️ Echec de l'IMU.");
     }
 
-    // Initialisation du PCA9685
-    //Serial.println("Initialisation du PCA9685...");
-    //pwm.begin();
-    //pwm.setPWMFreq(50); // Fréquence standard de 50Hz pour les servos
-    delay(10);
+    // 4. Initialisation des Actionneurs (CORRECT)
+    // Cette fonction va appeler pwm.init(0x7F) et configurer les TMC2208
+    Serial.println("Initialisation des actionneurs (Servos + Moteurs)...");
+    if (actuators.begin()) {
+        Serial.println("✅ Actionneurs prêts (PCA9685 détecté).");
+    } else {
+        Serial.println("⚠️ Echec PCA9685 ou Drivers Moteurs.");
+    }
 
     afficherMenu();
 }
@@ -147,27 +146,23 @@ void loop() {
             // --- NOUVEAU TEST : LE SERVO ---
             case '7': {
                 Serial.println("Test de balayage des 4 servos de direction...");
-                
-                // Position : Gauche toute (-0.78 rad ≈ -45°)
-                Serial.println(" -> Braquage Gauche");
-                //actuators.setServoAngles(-0.78, -0.78, -0.78, -0.78);
+                // Note : On utilise maintenant uniquement les fonctions d'actuators
+                Serial.println(" -> Braquage Gauche (-45°)");
+                actuators.setServoAngles(-0.78, -0.78, -0.78, -0.78);
                 delay(1500);
 
-                // Position : Droite toute (+0.78 rad ≈ +45°)
-                Serial.println(" -> Braquage Droite");
-                //actuators.setServoAngles(0.78, 0.78, 0.78, 0.78);
+                Serial.println(" -> Braquage Droite (+45°)");
+                actuators.setServoAngles(0.78, 0.78, 0.78, 0.78);
                 delay(1500);
 
-                // Retour au centre (0 rad = 90°)
-                Serial.println(" -> Retour au centre");
-                //actuators.setServoAngles(0, 0, 0, 0);
-                
-                Serial.println("Test Servo terminé !");
+                Serial.println(" -> Retour au centre (0°)");
+                actuators.setServoAngles(0, 0, 0, 0);
                 break;
             }
 
             case '8': {
-                //actuators.printStatus();
+                // On décommente cette fonction pour voir l'état des vitesses
+                actuators.printStatus();
                 break;
             }
 
