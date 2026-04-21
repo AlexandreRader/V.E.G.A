@@ -51,35 +51,45 @@ bool NRF_Comm::update() {
     if (!_radio.available()) return false;
 
     uint8_t packet[NRF_PAYLOAD_SIZE];
-    bool    gotPacket = false;
+    bool gotPacket = false;
 
-    // Vide tous les paquets disponibles dans le FIFO RF (jusqu'à 3)
     while (_radio.available()) {
         _radio.read(packet, NRF_PAYLOAD_SIZE);
+
+        // --- SÉCURITÉ 1 : Ignorer les paquets fantômes (uniquement des zéros) ---
+        bool allZeros = true;
+        for (int i = 0; i < NRF_PAYLOAD_SIZE; i++) {
+            if (packet[i] != 0) {
+                allZeros = false;
+                break;
+            }
+        }
+        if (allZeros) continue; // Si c'est du vide, on passe au paquet suivant sans rien faire
+
         gotPacket = true;
 
-        // ── Accumulation dans le buffer brut ─────────────────────────────────
-        // On s'arrête à NRF_CMD_BUFFER_SIZE - 1 pour ne jamais déborder
+        // --- Accumulation dans le buffer brut ---
         int space = (NRF_CMD_BUFFER_SIZE - 1) - _rawLen;
         if (space <= 0) {
-            // Buffer plein : on flush ce qu'on peut parser puis on recommence
             _parseBuffer();
             space = (NRF_CMD_BUFFER_SIZE - 1) - _rawLen;
         }
 
-        int toCopy = min(NRF_PAYLOAD_SIZE, space);
+        int toCopy = min((int)NRF_PAYLOAD_SIZE, space);
         memcpy(_rawBuf + _rawLen, packet, toCopy);
         _rawLen += toCopy;
 
-        // ── Debug : affiche le paquet reçu en ASCII + hex ─────────────────────
+        // --- SÉCURITÉ 2 : On commente le Serial.print de debug pour libérer la console ---
+        /*
         Serial.print("[NRF] Paquet reçu : \"");
         for (int i = 0; i < NRF_PAYLOAD_SIZE; i++) {
             if (packet[i] >= 0x20 && packet[i] < 0x7F) Serial.print((char)packet[i]);
-            else if (packet[i] == '\n')                 Serial.print("\\n");
-            else if (packet[i] == '\0')                 Serial.print("\\0");
-            else                                        Serial.printf("\\x%02X", packet[i]);
+            else if (packet[i] == '\n') Serial.print("\\n");
+            else if (packet[i] == '\0') Serial.print("\\0");
+            else Serial.printf("\\x%02X", packet[i]);
         }
         Serial.println("\"");
+        */
     }
 
     if (gotPacket) _parseBuffer();
@@ -92,53 +102,55 @@ bool NRF_Comm::update() {
 //  Les octets nuls de remplissage (padding) sont ignorés.
 // ─────────────────────────────────────────────────────────────────────────────
 void NRF_Comm::_parseBuffer() {
-    int start = 0;
+    if (_rawLen == 0) return;
 
+    // Si on a reçu 32 octets mais qu'il n'y a pas de '\n', 
+    // on force le traitement du contenu comme une commande unique.
+    bool foundLine = false;
     for (int i = 0; i < _rawLen; i++) {
-        char c = _rawBuf[i];
-
-        if (c == '\n') {
-            // Ligne complète trouvée
-            int lineLen = i - start;
-            if (lineLen > 0) {
-                _enqueueCommand(_rawBuf + start, lineLen);
+        if (_rawBuf[i] == '\n' || _rawBuf[i] == '\r') {
+            _enqueueCommand(_rawBuf, i); // Enfile ce qu'il y a AVANT le \n
+            
+            // On décale le reste du buffer
+            int remaining = _rawLen - (i + 1);
+            if (remaining > 0) {
+                memmove(_rawBuf, _rawBuf + i + 1, remaining);
+                _rawLen = remaining;
+            } else {
+                _rawLen = 0;
             }
-            start = i + 1;
-        }
-        else if (c == '\0') {
-            // Octet de padding : fin du contenu utile dans cette trame
-            // On envoie ce qui reste avant le premier '\0' si non vide
-            int lineLen = i - start;
-            if (lineLen > 0) {
-                // Pas de '\n' final → commande incomplète ou dernière ligne
-                // On la garde dans le buffer en attendant la suite
-                break;
-            }
-            start = i + 1; // Skip le padding
+            foundLine = true;
+            break;
         }
     }
 
-    // Décale ce qui n'a pas encore été consommé vers le début du buffer
-    int remaining = _rawLen - start;
-    if (remaining > 0 && start > 0) {
-        memmove(_rawBuf, _rawBuf + start, remaining);
+    // Force : Si le buffer est plein ou si on a un paquet complet sans \n
+    if (!foundLine && _rawLen >= NRF_PAYLOAD_SIZE) {
+        _enqueueCommand(_rawBuf, _rawLen);
+        _rawLen = 0;
     }
-    _rawLen = (remaining > 0) ? remaining : 0;
-    _rawBuf[_rawLen] = '\0';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  _enqueueCommand()
 // ─────────────────────────────────────────────────────────────────────────────
 void NRF_Comm::_enqueueCommand(const char* start, int len) {
-    if (_cmdCount >= 16) {
-        Serial.println("[NRF] AVERTISSEMENT : file de commandes pleine, commande ignorée.");
-        return;
+    if (_cmdCount >= 16) return;
+
+    // Création d'une String propre
+    String newCmd = "";
+    for(int i = 0; i < len; i++) {
+        if(start[i] >= 0x20 && start[i] < 0x7F) { // Uniquement caractères imprimables
+            newCmd += start[i];
+        }
     }
-    _cmdQueue[_cmdTail] = String(start).substring(0, len);
-    _cmdTail = (_cmdTail + 1) % 16;
-    _cmdCount++;
-    Serial.printf("[NRF] Commande extraite : \"%s\"\n", _cmdQueue[(_cmdTail + 15) % 16].c_str());
+
+    if (newCmd.length() > 0) {
+        _cmdQueue[_cmdTail] = newCmd;
+        _cmdTail = (_cmdTail + 1) % 16;
+        _cmdCount++;
+        Serial.printf("\n📡 [NRF] Commande validée : \"%s\"\n", newCmd.c_str());
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
