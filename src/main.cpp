@@ -3,10 +3,19 @@
 #include "pins.h"
 #include "IMUManager.h" 
 #include "HardwareControl.h"
+#include "PathFollower.h"
+#include "Kinematics.h"
+#include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" 
+#include "NRF.h"
 
 IMUManager imu;
 bool imu_ok = false;
 ActuatorManager actuators;
+// Instanciation de la radio
+NRF_Comm nrf(PIN_RADIO_CE, PIN_SPI_CSN);
+
+// Déclaration de la fonction de la tâche FreeRTOS
+void TaskRadio(void *pvParameters);
 
 
 
@@ -22,6 +31,10 @@ void afficherMenu() {
     Serial.println("6 : Lire la Centrale Inertielle (IMU)");
     Serial.println("7 : Tester les Servos (Balayage)");
     Serial.println("8 : Afficher le statut des Actionneurs");
+    Serial.println("7 : Tester les Servos (Balayage simple)");
+    Serial.println("8 : Afficher le statut des Actionneurs");
+    Serial.println("9 : Lancer une Mission Test (Pathfinder + Vrais Servos)");
+    Serial.println("R : Afficher le statut de la Radio (NRF24)");
     Serial.println("==========================================");
 }
 
@@ -33,6 +46,9 @@ void setup() {
 
     // 1. Initialisation du bus I2C (Unique pour tout le monde)
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+
+    // --- NOUVEAU : Forcer les broches du bus SPI ---
+    SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SPI_CSN);
     
     // 2. Configuration des pins directs
     pinMode(PIN_IR_OUT, INPUT);
@@ -55,6 +71,18 @@ void setup() {
     } else {
         Serial.println("⚠️ Echec PCA9685 ou Drivers Moteurs.");
     }
+
+    // --- CRÉATION DE LA TÂCHE RADIO (FreeRTOS) ---
+    Serial.println("Lancement de la tâche Radio (Core 0)...");
+    xTaskCreatePinnedToCore(
+        TaskRadio,      // Fonction contenant la boucle de la tâche
+        "TaskRadio",    // Nom pour le debug
+        4096,           // Taille de la mémoire allouée (Stack)
+        NULL,           // Paramètres (aucun ici)
+        1,              // Priorité (1 = normale)
+        NULL,           // Handle (non utilisé ici)
+        0               // Épinglé sur le Core 0 (libère le Core 1 pour la loop principale)
+    );
 
     afficherMenu();
 }
@@ -124,22 +152,23 @@ void loop() {
                     Serial.println("⚠️ L'IMU n'est pas initialisée.");
                     break;
                 }
-                Serial.println("Lecture Physique IMU :");
+                Serial.println("\n--- LECTURE COMPLÈTE IMU (Brutes + Angles) ---");
                 
-                for(int i = 0; i < 25; i++) {
-                    imu.readMotion(); // Met à jour Accel + Gyro
-                    float cap_raw = imu.getRawHeading(); // Met à jour Boussole
+                for(int i = 0; i < 50; i++) {
+                    // 1. Lecture Accéléromètre et Gyroscope
+                    imu.readMotion(); 
                     
-                    Serial.printf("Acc[X:%5.1f Y:%5.1f Z:%5.1f] | Gyr[X:%6.1f Y:%6.1f Z:%6.1f] | ", 
+                    // 2. Lecture Boussole ET calcul de Pitch, Roll et Cap
+                    // (Ne JAMAIS appeler getRawHeading() manuellement ici !)
+                    imu.updateEulerAngles();
+                    
+                    // 3. Affichage global sur une seule ligne
+                    Serial.printf("Acc[X:%5.1f Y:%5.1f Z:%5.1f] | Gyr[X:%6.1f Y:%6.1f Z:%6.1f] | ROLL: %5.1f° | PITCH: %5.1f° | CAP: %5.1f°\n", 
                                   imu.accX, imu.accY, imu.accZ, 
-                                  imu.gyroX, imu.gyroY, imu.gyroZ);
+                                  imu.gyroX, imu.gyroY, imu.gyroZ,
+                                  imu.roll, imu.pitch, imu.heading);
                     
-                    if (cap_raw < 0) {
-                        Serial.println("Cap: ATTENTE...");
-                    } else {
-                        Serial.printf("Cap: %5.1f°\n", cap_raw * (180.0 / PI));
-                    }
-                    delay(200);
+                    delay(100); // 10 lectures par seconde
                 }
                 break;
             }
@@ -166,12 +195,124 @@ void loop() {
                 break;
             }
 
+            case '9': {
+                Serial.println("\n--- DÉBUT DE LA MISSION DE TEST ---");
+                Serial.println("⚠️ Le robot va simuler son déplacement et braquer ses roues !");
+                Serial.println("Tapez 's' et Entrée pour stopper la mission en cours.");
+                delay(2000); // Laisse le temps de reculer
+
+                // Instanciation locale pour le test
+                PathFollower follower;
+                Kinematics kinematics;
+                follower.resetMission();
+
+                // Position simulée du robot (Démarrage)
+                float robot_x = START_X;
+                float robot_y = START_Y;
+                float robot_theta = START_THETA;
+                
+                unsigned long last_update = millis();
+                bool mission_complete = false;
+
+                while (!mission_complete) {
+                    // 1. Vérifier si on veut stopper d'urgence
+                    if (Serial.available() > 0) {
+                        char stopCmd = Serial.read();
+                        if (stopCmd == 's') {
+                            Serial.println("\n🛑 MISSION INTERROMPUE PAR L'UTILISATEUR");
+                            break;
+                        }
+                    }
+
+                    // 2. Gestion du temps (dt)
+                    unsigned long now = millis();
+                    float dt = (now - last_update) / 1000.0;
+                    last_update = now;
+
+                    // 3. Calcul de la consigne (Suivi de chemin)
+                    VelocityCommand cmd = follower.update(robot_x, robot_y, robot_theta);
+
+                    // 4. Simulation de l'odométrie (Déplacement mathématique parfait)
+                    robot_theta += cmd.angular_w * dt;
+                    robot_x += cmd.linear_v * cos(robot_theta) * dt;
+                    robot_y += cmd.linear_v * sin(robot_theta) * dt;
+
+                    // 5. Calcul de la cinématique (Conversion Vitesse -> Roues)
+                    MotorCommands motor_cmds = kinematics.calculateDrive(cmd.linear_v, cmd.angular_w);
+
+                    // 6. ACTION PHYSIQUE : On envoie aux vrais servos !
+                    actuators.setServoAngles(
+                        motor_cmds.angle_FL, motor_cmds.angle_FR,
+                        motor_cmds.angle_RL, motor_cmds.angle_RR
+                    );
+
+                    // 7. Affichage dans la console
+                    Serial.printf("WP: %d/%d | POS[X:%.2f Y:%.2f T:%.1f°] | Cmd[V:%.2f W:%.2f] | Roues(°)[FL:%.0f FR:%.0f]\n",
+                        follower.getCurrentIndex() + 1, PATH_SIZE,
+                        robot_x, robot_y, robot_theta * 180.0/PI,
+                        cmd.linear_v, cmd.angular_w,
+                        motor_cmds.angle_FL * 180.0/PI, motor_cmds.angle_FR * 180.0/PI
+                    );
+
+                    // 8. Fin de mission ?
+                    if (follower.isDone()) {
+                        Serial.println("\n✅ MISSION TERMINÉE AVEC SUCCÈS !");
+                        mission_complete = true;
+                    }
+
+                    // On simule une boucle à 10Hz
+                    delay(100); 
+                }
+
+                // Remise à zéro à la fin
+                Serial.println("Retour des roues au centre...");
+                actuators.setServoAngles(0, 0, 0, 0);
+                break;
+            }
+
+            case 'r':
+            case 'R': {
+                nrf.printStatus(); // Affiche l'état de ton module SPI
+                break;
+            }
+
             default:
                 Serial.println("⚠️ Choix non reconnu.");
                 break;
         }
+
         delay(1000);
         afficherMenu();
+    }
+}
+
+
+// ==========================================
+// TÂCHE FREERTOS : COMMUNICATION RADIO
+// ==========================================
+void TaskRadio(void *pvParameters) {
+    // 1. Initialisation (Exécutée une seule fois au lancement de la tâche)
+    if (!nrf.begin()) {
+        Serial.println("⚠️ TÂCHE RADIO : Échec de l'initialisation du NRF24L01.");
+        vTaskDelete(NULL); // Détruit la tâche si le module est débranché
+    }
+
+    // 2. Boucle infinie de la tâche (Équivalent du loop, mais isolé)
+    for (;;) {
+        // Met à jour la lecture du module RF
+        nrf.update();
+
+        // S'il y a des commandes complètes dans la file d'attente, on les lit
+        while (nrf.hasCommand()) {
+            String cmd = nrf.readCommand();
+            
+            // Affichage avec un marqueur spécial pour qu'on le repère bien au milieu du reste
+            Serial.println("\n📡 [MESSAGE RADIO REÇU] -> " + cmd);
+        }
+
+        // 3. Délai obligatoire (Très important en FreeRTOS)
+        // Laisse respirer le processeur pendant 20 millisecondes (soit 50 vérifications par seconde)
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 

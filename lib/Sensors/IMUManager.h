@@ -14,6 +14,9 @@ public:
     // Variables PHYSIQUES prêtes à l'emploi
     float accX, accY, accZ;       // en m/s²
     float gyroX, gyroY, gyroZ;    // en °/s
+    float pitch = 0;
+    float roll = 0;
+    float heading = 0;
 
     bool begin() {
         Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -42,9 +45,9 @@ public:
         int16_t gz = icm20600.getGyroscopeZ();
 
         // Conversion avec les diviseurs de la bibliothèque (16G et 2000 dps)
-        accX = (ax / 2048.0) * 9.81;
-        accY = (ay / 2048.0) * 9.81;
-        accZ = (az / 2048.0) * 9.81;
+        accX = (ax / 1024.0) * 9.81;
+        accY = (ay / 1024.0) * 9.81;
+        accZ = (az / 1024.0) * 9.81;
         
         gyroX = gx / 16.4;
         gyroY = gy / 16.4;
@@ -82,5 +85,21 @@ public:
         while (current < 0) current += 2 * PI;
         while (current >= 2 * PI) current -= 2 * PI;
         return current;
+    }
+    void updateEulerAngles() {
+        // 1. Calcul du Roulis (Roll) : inclinaison latérale
+        // On regarde la répartition de la gravité sur Y et Z
+        roll = atan2(accY, accZ) * 180.0 / PI;
+
+        // 2. Calcul du Tangage (Pitch) : inclinaison avant/arrière
+        // On compare l'axe X au plan formé par Y et Z
+        pitch = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * 180.0 / PI;
+
+        // 3. Récupération du Cap (Heading)
+        // On utilise ta fonction existante qui lit le magnétomètre
+        heading = getRawHeading() * 180.0 / PI;
+        
+        // Normalisation du cap entre 0 et 360°
+        if (heading < 0) heading += 360.0;
     }
 };
