@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Le fichier généré par votre station sol Python
+#include "../../include/config.h"
 
 // Structure pour renvoyer la consigne globale du robot
 struct VelocityCommand {
@@ -13,15 +14,6 @@ private:
     int currentIndex;
     bool missionComplete;
 
-    // --- Paramètres de Navigation ---
-    // Rayon de validation d'un point (ici 15 cm)
-    const float ARRIVAL_THRESHOLD = 0.15; 
-    
-    // Vitesse de croisière du rover (m/s)
-    const float BASE_SPEED = 0.3; 
-    
-    // Gain de direction (plus il est élevé, plus le robot braque fort vers la cible)
-    const float Kp_ANGULAR = 1.2; 
 
 public:
     PathFollower();

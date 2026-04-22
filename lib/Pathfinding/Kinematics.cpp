@@ -1,5 +1,6 @@
 #include "Kinematics.h"
 #include <math.h>
+#include "config.h"
 
 Kinematics::Kinematics() {}
 

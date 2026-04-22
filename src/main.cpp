@@ -7,11 +7,15 @@
 #include "Kinematics.h"
 #include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Assure-toi que PATH_SIZE > 0 ici !
 #include "NRF.h"
+#include "Detection.h"
+#include "config.h"
 
 // --- Objets Globaux ---
 IMUManager imu;
 ActuatorManager actuators;
 NRF_Comm nrf(PIN_RADIO_CE, PIN_SPI_CSN);
+ToFManager tof;        // Notre nouveau gestionnaire d'obstacles
+bool tof_ok = false;
 
 // --- Statuts de sécurité ---
 bool imu_ok = false;
@@ -22,6 +26,7 @@ void afficherMenu() {
     Serial.println("\n==========================================");
     Serial.println("🛠️ MENU DE TEST MATERIEL - VEGA SC317");
     Serial.println("==========================================");
+    Serial.println("0 : Lire les capteurs ToF (Distances)");
     Serial.println("1 : Scanner le bus I2C");
     Serial.println("2 : Tester la LED RGB interne (Pin 38)");
     Serial.println("3 : Lire le capteur Infrarouge (Pin 48)");
@@ -77,6 +82,13 @@ void setup() {
     } else {
         Serial.println("⚠️ FAIL (Désactivée)");
     }
+    // 6. Initialisation ToF
+    Serial.print("Initialisation ToF... \n");
+    if (tof.begin()) {
+        tof_ok = true;
+    } else {
+        Serial.println("⚠️ FAIL (ToF)");
+    }
 
     afficherMenu();
 }
@@ -104,6 +116,38 @@ void loop() {
         Serial.printf("\n--- Test %c ---\n", choix);
 
         switch (choix) {
+            
+            case '0': {
+                if (!tof_ok) { 
+                    Serial.println("⚠️ Les capteurs ToF ne sont pas initialisés."); 
+                    break; 
+                }
+                Serial.println("\n--- LECTURE DES CAPTEURS ToF (Pendant 10 secondes) ---");
+                Serial.println("Passez votre main devant les capteurs...");
+                Serial.println("Tapez 's' et Entrée pour arrêter plus tôt.");
+                
+                // On boucle 50 fois avec un délai de 200ms = 10 secondes max
+                for (int i = 0; i < 50; i++) {
+                    // Arrêt manuel si on tape 's'
+                    if (Serial.available() > 0 && Serial.read() == 's') {
+                        Serial.println("\n🛑 Arrêt manuel de la lecture.");
+                        break;
+                    }
+
+                    // 1. Mise à jour des données
+                    tof.update(); 
+                    
+                    // 2. Affichage
+                    tof.printStatus(); 
+                    
+                    // 3. Petit délai pour ne pas saturer la console (5 lectures par seconde)
+                    delay(200); 
+                }
+                
+                Serial.println("\n✅ Fin du test ToF.");
+                break;
+            }
+            
             case '1': {
                 Serial.println("Scan I2C...");
                 int nb = 0;

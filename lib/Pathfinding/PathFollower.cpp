@@ -1,5 +1,6 @@
 #include "PathFollower.h"
 #include <math.h>
+#include "config.h"
 
 PathFollower::PathFollower() {
     resetMission();
