@@ -27,3 +27,12 @@ const float TARGET_SPEED_MS = 0.05;
 
 const float ARRIVAL_THRESHOLD = 0.15; // Rayon de validation d'un point (15 cm)
 const float Kp_ANGULAR = 1.2;         // Gain de braquage (Force avec laquelle il tourne)
+
+// --- Paramètres IMU & Boussole ---
+// Déclinaison magnétique locale (Virton, BE = ~ +1.83°)
+const float MAGNETIC_DECLINATION = 1.83; 
+
+// Offsets du magnétomètre (À remplir après avoir fait la calibration en "8")
+const int32_t MAG_OFFSET_X = 0;
+const int32_t MAG_OFFSET_Y = 0;
+const int32_t MAG_OFFSET_Z = 0;

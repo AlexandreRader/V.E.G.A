@@ -5,7 +5,7 @@
 #include "HardwareControl.h"
 #include "PathFollower.h"
 #include "Kinematics.h"
-#include "/home/wankeur/Documents/Code/Github/V.E.G.A/mission_export.h" // Assure-toi que PATH_SIZE > 0 ici !
+#include "../../V.E.G.A/mission_export.h" // Assure-toi que PATH_SIZE > 0 ici !
 #include "NRF.h"
 #include "Detection.h"
 #include "config.h"
@@ -397,6 +397,16 @@ void loop() {
                 if (nrf_ok) nrf.printStatus(); 
                 else Serial.println("Radio désactivée au démarrage.");
                 break;
+
+            case 'C':
+            case 'c': {
+                if (imu_ok) {
+                    imu.calibrateMagnetometer();
+                } else {
+                    Serial.println("❌ L'IMU n'est pas initialisée.");
+                }
+                break;
+            }
                 
             default:
                 Serial.println("⚠️ Choix non reconnu.");

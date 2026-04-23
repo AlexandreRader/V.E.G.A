@@ -2,7 +2,7 @@
 
 #include <RF24.h>
 #include <SPI.h>
-#include "/home/wankeur/Documents/Code/Github/V.E.G.A/include/pins.h"
+#include "../../V.E.G.A/include/pins.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Paramètres RF — Groupe 4 : V.E.G.A
@@ -25,7 +25,7 @@ static const uint64_t NRF_PIPE_ADDRESS = 0xE8E8F0F0A4LL;
 //  Taille max du buffer de commandes reconstituées
 //  (plusieurs trames de 32 octets peuvent former un message complet)
 // ─────────────────────────────────────────────────────────────────────────────
-#define NRF_CMD_BUFFER_SIZE 256
+#define NRF_CMD_BUFFER_SIZE 3200
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Classe NRF_Comm

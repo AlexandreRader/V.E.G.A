@@ -1,105 +1,146 @@
 #pragma once
 #include <Arduino.h>
 #include <Wire.h>
-#include "AK09918.h"   // TA bibliothèque réparée
-#include "ICM20600.h"  // TA bibliothèque réparée
+#include "AK09918.h"
+#include "ICM20600.h"
+#include "config.h"
 
 class IMUManager {
 private:
     AK09918 ak09918;
-    ICM20600 icm20600{true}; // Force l'adresse 0x69
-    float headingOffset = 0.0;
+    ICM20600 icm20600;
+    
+    // Offset calculé au démarrage pour le gyroscope
+    float gyro_offset_z;
 
 public:
-    // Variables PHYSIQUES prêtes à l'emploi
-    float accX, accY, accZ;       // en m/s²
-    float gyroX, gyroY, gyroZ;    // en °/s
-    float pitch = 0;
-    float roll = 0;
-    float heading = 0;
+    // Variables brutes
+    int16_t acc_x, acc_y, acc_z;
+    int32_t mag_x, mag_y, mag_z;
+
+    // --- VARIABLES CALCULÉES RÉINTÉGRÉES POUR LE MENU ---
+    float accX, accY, accZ;       // Accélérations en m/s^2
+    float gyroX, gyroY, gyroZ;    // Vitesses angulaires en rad/s
+    float roll, pitch, heading;   // Orientations en Radians
+
+    IMUManager() : icm20600(true), gyro_offset_z(0) {}
 
     bool begin() {
-        Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-
-        // 1. Initialisation via la bibliothèque (Gère le bypass toute seule)
+        Serial.println("Initialisation IMU (ICM20600 + AK09918)...");
+        
         icm20600.initialize();
-
-        // 2. Initialisation de la boussole via la bibliothèque
         if (ak09918.initialize() != AK09918_ERR_OK) {
+            Serial.println("❌ Erreur AK09918 (Magnétomètre) !");
             return false;
         }
+
+        ak09918.switchMode(AK09918_POWER_DOWN);
         ak09918.switchMode(AK09918_CONTINUOUS_100HZ);
 
-        return true;
-    }
+        // Attente que le capteur soit prêt
+        while (ak09918.isDataReady() != AK09918_ERR_OK) {
+            delay(10);
+        }
 
-    // --- Lecture via la bibliothèque ---
-    bool readMotion() {
-        // On récupère les valeurs brutes directement avec les fonctions de Seeed Studio
-        int16_t ax = icm20600.getAccelerationX();
-        int16_t ay = icm20600.getAccelerationY();
-        int16_t az = icm20600.getAccelerationZ();
-
-        int16_t gx = icm20600.getGyroscopeX();
-        int16_t gy = icm20600.getGyroscopeY();
-        int16_t gz = icm20600.getGyroscopeZ();
-
-        // Conversion avec les diviseurs de la bibliothèque (16G et 2000 dps)
-        accX = (ax / 1024.0) * 9.81;
-        accY = (ay / 1024.0) * 9.81;
-        accZ = (az / 1024.0) * 9.81;
-        
-        gyroX = gx / 16.4;
-        gyroY = gy / 16.4;
-        gyroZ = gz / 16.4;
+        // --- CALIBRATION STATIQUE DU GYROSCOPE ---
+        Serial.print("Calibration du Gyroscope (Ne touchez pas le robot)... ");
+        long sumZ = 0;
+        for (int i = 0; i < 200; i++) {
+            sumZ += icm20600.getGyroscopeZ();
+            delay(10);
+        }
+        gyro_offset_z = sumZ / 200.0;
+        Serial.println("✅ OK");
 
         return true;
     }
 
-    // --- Boussole via la bibliothèque (Celle qui marchait !) ---
-    float getRawHeading() {
-        int32_t x, y, z;
-        
-        // La fonction isDataReady de la librairie est ultra fiable
-        if (ak09918.isDataReady() == AK09918_ERR_OK) {
-            ak09918.getData(&x, &y, &z);
-            
-            float angle = atan2((float)y, (float)x);
-            if (angle < 0) angle += 2 * PI;
-            return angle;
-        }
-        return -1.0; // Retourne -1 si la donnée n'est pas encore prête
+    void readMotion() {
+        // Lecture Accéléromètre
+        acc_x = icm20600.getAccelerationX();
+        acc_y = icm20600.getAccelerationY();
+        acc_z = icm20600.getAccelerationZ();
+
+        // Conversion brute -> m/s² (1g = 16384 LSB. 1g = 9.81 m/s²)
+        accX = (float)acc_x * (9.81 / 16384.0);
+        accY = (float)acc_y * (9.81 / 16384.0);
+        accZ = (float)acc_z * (9.81 / 16384.0); // Réintégré
+
+        // Lecture Gyroscope
+        float raw_gyroX = icm20600.getGyroscopeX(); // Réintégré
+        float raw_gyroY = icm20600.getGyroscopeY(); // Réintégré
+        float raw_gyroZ = icm20600.getGyroscopeZ() - gyro_offset_z;
+
+        // Conversion en rad/s (1 dps = 131 LSB)
+        gyroX = raw_gyroX * (M_PI / 180.0) / 131.0; // Réintégré
+        gyroY = raw_gyroY * (M_PI / 180.0) / 131.0; // Réintégré
+        gyroZ = raw_gyroZ * (M_PI / 180.0) / 131.0; 
+
+        // Lecture Magnétomètre (Avec offset manuel depuis config.h)
+        ak09918.getData(&mag_x, &mag_y, &mag_z);
+        mag_x -= MAG_OFFSET_X;
+        mag_y -= MAG_OFFSET_Y;
+        mag_z -= MAG_OFFSET_Z;
     }
 
-    void setStartHeading(float mission_start_theta) {
-        float real_magnetic_heading = getRawHeading();
-        if (real_magnetic_heading >= 0) {
-            headingOffset = real_magnetic_heading - mission_start_theta;
-        }
-    }
-
-    float getCurrentTheta() {
-        float raw = getRawHeading();
-        if (raw < 0) return 0.0; 
-        float current = raw - headingOffset;
-        while (current < 0) current += 2 * PI;
-        while (current >= 2 * PI) current -= 2 * PI;
-        return current;
-    }
     void updateEulerAngles() {
-        // 1. Calcul du Roulis (Roll) : inclinaison latérale
-        // On regarde la répartition de la gravité sur Y et Z
-        roll = atan2(accY, accZ) * 180.0 / PI;
+        // Calcul du Roll et Pitch avec l'accéléromètre
+        roll = atan2((float)acc_y, (float)acc_z);
+        pitch = atan2(-(float)acc_x, sqrt((float)acc_y * acc_y + (float)acc_z * acc_z));
 
-        // 2. Calcul du Tangage (Pitch) : inclinaison avant/arrière
-        // On compare l'axe X au plan formé par Y et Z
-        pitch = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * 180.0 / PI;
-
-        // 3. Récupération du Cap (Heading)
-        // On utilise ta fonction existante qui lit le magnétomètre
-        heading = getRawHeading() * 180.0 / PI;
+        // Compensation du Tilt pour la boussole
+        double Xheading = mag_x * cos(pitch) + mag_y * sin(roll) * sin(pitch) + mag_z * cos(roll) * sin(pitch);
+        double Yheading = mag_y * cos(roll) - mag_z * sin(pitch);
         
-        // Normalisation du cap entre 0 et 360°
-        if (heading < 0) heading += 360.0;
+        // Calcul du cap en degrés
+        double heading_deg = 180.0 + (57.2957 * atan2(Yheading, Xheading)) + MAGNETIC_DECLINATION;
+        
+        // Normalisation entre 0 et 360
+        if (heading_deg >= 360.0) heading_deg -= 360.0;
+        if (heading_deg < 0.0) heading_deg += 360.0;
+
+        // Conversion en radians pour le filtre de Kalman
+        heading = heading_deg * (M_PI / 180.0);
+    }
+
+    // --- FONCTION DE CALIBRATION MANUELLE (Magnétomètre) ---
+    void calibrateMagnetometer() {
+        Serial.println("\n=== CALIBRATION DE LA BOUSSOLE ===");
+        Serial.println("Prenez le rover dans vos mains.");
+        Serial.println("Dans 3 secondes, faites des mouvements en forme de '8' dans toutes les directions !");
+        delay(3000);
+        Serial.print("Calibration en cours (10 secondes)...");
+
+        int32_t val_x, val_y, val_z;
+        int32_t min_x = 32767, max_x = -32768;
+        int32_t min_y = 32767, max_y = -32768;
+        int32_t min_z = 32767, max_z = -32768;
+
+        uint32_t startTime = millis();
+        while ((millis() - startTime) < 10000) {
+            ak09918.getData(&val_x, &val_y, &val_z);
+            
+            if (val_x < min_x) min_x = val_x;
+            if (val_x > max_x) max_x = val_x;
+            if (val_y < min_y) min_y = val_y;
+            if (val_y > max_y) max_y = val_y;
+            if (val_z < min_z) min_z = val_z;
+            if (val_z > max_z) max_z = val_z;
+
+            Serial.print(".");
+            delay(50);
+        }
+
+        int32_t off_x = min_x + (max_x - min_x) / 2;
+        int32_t off_y = min_y + (max_y - min_y) / 2;
+        int32_t off_z = min_z + (max_z - min_z) / 2;
+
+        Serial.println("\n\n✅ Calibration Terminée !");
+        Serial.println("COPIEZ-COLLEZ CES LIGNES DANS VOTRE config.h :");
+        Serial.println("-------------------------------------------------");
+        Serial.printf("const int32_t MAG_OFFSET_X = %ld;\n", off_x);
+        Serial.printf("const int32_t MAG_OFFSET_Y = %ld;\n", off_y);
+        Serial.printf("const int32_t MAG_OFFSET_Z = %ld;\n", off_z);
+        Serial.println("-------------------------------------------------");
     }
 };
