@@ -217,4 +217,22 @@ public:
         Serial.printf("Arrière Gauche: %d mm (%s)\n", distances[2], data_ready[2] ? "OK" : (active[2] ? "Wait" : "OFF"));
         Serial.printf("Arrière Droit:  %d mm (%s)\n", distances[3], data_ready[3] ? "OK" : (active[3] ? "Wait" : "OFF"));
     }
+
+        // Accesseurs pour lire les distances depuis l'extérieur
+    uint16_t getFrontLeftDistance() const { return distances[0]; }
+    uint16_t getFrontRightDistance() const { return distances[1]; }
+    uint16_t getRearLeftDistance() const { return distances[2]; }
+    uint16_t getRearRightDistance() const { return distances[3]; }
+
+    // Arrêt d'urgence si un obstacle est trop près
+    bool emergencyStopRequired() const {
+        for (int i = 0; i < 4; i++) {
+            // Si la donnée est valide ET qu'elle est sous le seuil critique (ex: 20cm)
+            if (data_ready[i] && distances[i] < CRITICAL_DISTANCE_MM) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 };

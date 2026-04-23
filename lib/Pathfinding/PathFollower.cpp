@@ -57,15 +57,20 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
     while (angle_error > M_PI) angle_error -= 2.0 * M_PI;
     while (angle_error < -M_PI) angle_error += 2.0 * M_PI;
 
-    // 5. Générer les commandes de vitesse
-    cmd.linear_v = BASE_SPEED;
+// 5. Générer les commandes de vitesse (Profil dynamique)
     
-    // Si le robot doit tourner brutalement (erreur > 30 degrés), on le fait ralentir
-    if (abs(angle_error) > 0.5) {
-        cmd.linear_v = BASE_SPEED * 0.5; 
+    // On calcule le freinage dans les virages (1.0 = tout droit, 0.0 = virage à 90°)
+    float speed_factor = cos(angle_error);
+    
+    // On garde un minimum de 20% de la vitesse cible pour ne pas s'arrêter
+    if (speed_factor < 0.2) {
+        speed_factor = 0.2; 
     }
 
-    // La vitesse de rotation est proportionnelle à l'erreur d'angle
+    // LA MAGIE EST ICI : On prend la vitesse max autorisée par le config.h,
+    // et on lui applique le facteur de freinage.
+    cmd.linear_v = TARGET_SPEED_MS * speed_factor;
+    
     cmd.angular_w = Kp_ANGULAR * angle_error;
 
     return cmd;
