@@ -1,4 +1,5 @@
 #include "NRF.h"
+#include "mission.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constructeur
@@ -99,19 +100,17 @@ bool NRF_Comm::update() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  _parseBuffer()
 //  Découpe _rawBuf en lignes (séparées par '\n') et les enfile dans _cmdQueue.
-//  Les octets nuls de remplissage (padding) sont ignorés.
 // ─────────────────────────────────────────────────────────────────────────────
 void NRF_Comm::_parseBuffer() {
     if (_rawLen == 0) return;
 
-    // Si on a reçu 32 octets mais qu'il n'y a pas de '\n', 
-    // on force le traitement du contenu comme une commande unique.
     bool foundLine = false;
     for (int i = 0; i < _rawLen; i++) {
+        // Dès qu'on trouve un 'Entrée' (\n ou \r), on sait que le message est fini !
         if (_rawBuf[i] == '\n' || _rawBuf[i] == '\r') {
-            _enqueueCommand(_rawBuf, i); // Enfile ce qu'il y a AVANT le \n
+            _enqueueCommand(_rawBuf, i); // On traite tout le message reconstitué
             
-            // On décale le reste du buffer
+            // On décale le reste du buffer s'il y a d'autres données après
             int remaining = _rawLen - (i + 1);
             if (remaining > 0) {
                 memmove(_rawBuf, _rawBuf + i + 1, remaining);
@@ -124,33 +123,105 @@ void NRF_Comm::_parseBuffer() {
         }
     }
 
-    // Force : Si le buffer est plein ou si on a un paquet complet sans \n
-    if (!foundLine && _rawLen >= NRF_PAYLOAD_SIZE) {
+    // 🎯 CORRECTION ICI : On ne force le traitement QUE si le grand buffer de 512 octets 
+    // est plein pour éviter qu'il n'explose. S'il n'est pas plein, on attend sagement 
+    // l'arrivée du reste des paquets de 32 octets !
+    if (!foundLine && _rawLen >= (NRF_CMD_BUFFER_SIZE - 1)) {
         _enqueueCommand(_rawBuf, _rawLen);
         _rawLen = 0;
     }
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  _enqueueCommand()
 // ─────────────────────────────────────────────────────────────────────────────
 void NRF_Comm::_enqueueCommand(const char* start, int len) {
     if (_cmdCount >= 16) return;
 
-    // Création d'une String propre
     String newCmd = "";
     for(int i = 0; i < len; i++) {
-        if(start[i] >= 0x20 && start[i] < 0x7F) { // Uniquement caractères imprimables
+        if(start[i] >= 0x20 && start[i] < 0x7F) { 
             newCmd += start[i];
         }
     }
 
     if (newCmd.length() > 0) {
+        // 🎯 INTERCEPTION DE LA MISSION
+        if (newCmd.charAt(0) == 'M' || newCmd.charAt(0) == 'm') {
+            Serial.printf("\n📡 [NRF] Trajectoire brute reçue (%d caractères). Traitement...\n", newCmd.length());
+            
+            if (_parseMissionString(newCmd)) {
+                // On prévient le main.cpp avec un message simple au lieu de lui envoyer les 200 caractères
+                _cmdQueue[_cmdTail] = "MISSION_LOADED";
+                _cmdTail = (_cmdTail + 1) % 16;
+                _cmdCount++;
+            }
+            return; // ⚠️ On quitte la fonction, on ne stocke pas le gros texte dans la file !
+        }
+
+        // Si ce n'est pas une mission, c'est une commande normale
         _cmdQueue[_cmdTail] = newCmd;
         _cmdTail = (_cmdTail + 1) % 16;
         _cmdCount++;
         Serial.printf("\n📡 [NRF] Commande validée : \"%s\"\n", newCmd.c_str());
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  _parseMissionString() - Le Cerveau du décodage
+// ─────────────────────────────────────────────────────────────────────────────
+bool NRF_Comm::_parseMissionString(String payload) {
+    PATH_SIZE = 0; 
+    
+    // 1. Extraire l'en-tête (Tout avant le premier ';')
+    int headerEnd = payload.indexOf(';');
+    if (headerEnd == -1) return false;
+
+    String header = payload.substring(1, headerEnd); // On saute le 'M'
+    
+    // Découpage manuel de l'en-tête (6 valeurs séparées par des virgules)
+    int idx[6], i = 0;
+    int current_comma = header.indexOf(',');
+    while (current_comma != -1 && i < 5) {
+        idx[i++] = current_comma;
+        current_comma = header.indexOf(',', current_comma + 1);
+    }
+    
+    if (i == 5) { // Si on a bien trouvé 5 virgules (donc 6 valeurs)
+        START_X     = header.substring(0, idx[0]).toFloat();
+        START_Y     = header.substring(idx[0]+1, idx[1]).toFloat();
+        START_THETA = header.substring(idx[1]+1, idx[2]).toFloat();
+        GOAL_X      = header.substring(idx[2]+1, idx[3]).toFloat();
+        GOAL_Y      = header.substring(idx[3]+1, idx[4]).toFloat();
+        GOAL_THETA  = header.substring(idx[4]+1).toFloat();
+    } else {
+        Serial.println("❌ [NRF] En-tête de mission invalide !");
+        return false;
+    }
+
+    // 2. Extraire la liste des waypoints (Après le premier ';')
+    int startIndex = headerEnd + 1;
+    int endIndex = payload.indexOf(';', startIndex);
+
+    while (endIndex != -1 && PATH_SIZE < MAX_WAYPOINTS) {
+        String wpStr = payload.substring(startIndex, endIndex);
+        int commaIndex = wpStr.indexOf(',');
+        
+        if (commaIndex != -1) {
+            MISSION_PATH[PATH_SIZE].x = wpStr.substring(0, commaIndex).toFloat();
+            MISSION_PATH[PATH_SIZE].y = wpStr.substring(commaIndex + 1).toFloat();
+            PATH_SIZE++;
+        }
+        startIndex = endIndex + 1;
+        endIndex = payload.indexOf(';', startIndex);
+    }
+
+    if (PATH_SIZE > 0) {
+        mission_ready_to_start = true;
+        Serial.printf("✅ [NRF] Mission décodée : %d WP. Départ: [%.1f, %.1f, %.1f°]\n", 
+                      PATH_SIZE, START_X, START_Y, START_THETA * 180.0/M_PI);
+        return true;
+    }
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

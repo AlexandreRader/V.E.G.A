@@ -33,6 +33,6 @@ const float Kp_ANGULAR = 1.2;         // Gain de braquage (Force avec laquelle i
 const float MAGNETIC_DECLINATION = 1.83; 
 
 // Offsets du magnétomètre (À remplir après avoir fait la calibration en "8")
-const int32_t MAG_OFFSET_X = 0;
-const int32_t MAG_OFFSET_Y = 0;
-const int32_t MAG_OFFSET_Z = 0;
+const int32_t MAG_OFFSET_X = -17;
+const int32_t MAG_OFFSET_Y = -20;
+const int32_t MAG_OFFSET_Z = -51;

@@ -5,11 +5,12 @@
 #include "HardwareControl.h"
 #include "PathFollower.h"
 #include "Kinematics.h"
-#include "../../V.E.G.A/mission_export.h" // Assure-toi que PATH_SIZE > 0 ici !
+#include "../../V.E.G.A/lib/Communication/mission.h"
 #include "NRF.h"
 #include "Detection.h"
 #include "config.h"
 #include "EKFManager.h"
+#include "mission.h"
 
 // --- Objets Globaux ---
 IMUManager imu;
@@ -34,6 +35,22 @@ bool imu_ok = false;
 bool nrf_ok = false;
 bool actuators_ok = false;
 
+
+// ==========================================
+// ALLOCATION EN MÉMOIRE RAM (Modifiables par la radio !)
+// ==========================================
+int PATH_SIZE = 0;
+Waypoint MISSION_PATH[MAX_WAYPOINTS];
+bool mission_ready_to_start = false;
+
+float START_X = 0.0;
+float START_Y = 0.0;
+float START_THETA = 0.0;
+float GOAL_X = 0.0;
+float GOAL_Y = 0.0;
+float GOAL_THETA = 0.0;
+
+
 void afficherMenu() {
     Serial.println("\n==========================================");
     Serial.println("🛠️ MENU DE TEST MATERIEL - VEGA SC317");
@@ -49,6 +66,7 @@ void afficherMenu() {
     Serial.println("8 : Afficher le statut des Actionneurs");
     Serial.println("9 : Lancer une Mission Test (Simulation complète)");
     Serial.println("R : Afficher le statut de la Radio (NRF24)");
+    Serial.println("C : Calibration de l'IMU ");
     Serial.println("==========================================");
 }
 
@@ -191,19 +209,83 @@ void updateNavigationTask(float dt) {
 
 
 void loop() {
-    // --- PARTIE RADIO (Tâche de fond non-bloquante) ---
-    if (nrf_ok) {
-        nrf.update();
-        while (nrf.hasCommand()) {
-            String cmd = nrf.readCommand();
-            Serial.println("\n📡 [RADIO] Commande reçue : " + cmd);
+    // 1. Lecture radio
+    nrf.update();
+
+    // 2. Traitement des commandes radio (Le Lexique)
+    if (nrf.hasCommand()) {
+        String cmd = nrf.readCommand();
+
+        if (cmd == "MISSION_LOADED") {
+            // Le NRF a tout décodé. On initialise l'EKF avec notre position de départ !
+            ekf.reset(START_X, START_Y, START_THETA); // ⚠️ Assure-toi d'avoir une fonction reset dans ton EKF
+            follower.resetMission();
+            Serial.println("🎯 Robot localisé et PathFollower prêt. En attente de 'START'...");
+        } 
+        
+        else if (cmd == "START") {
+            if (mission_ready_to_start) {
+                Serial.println("🚀 DÉCOLLAGE : Mission activée !");
+                mission_active = true;
+                actuators.enableMotors(true);
+            } else {
+                Serial.println("❌ Impossible de démarrer : Aucune mission en mémoire !");
+            }
+        } 
+        
+        else if (cmd == "STOP") {
+            Serial.println("🛑 ARRÊT D'URGENCE !");
+            mission_active = false;
+            actuators.setStepperSpeeds(0,0,0,0,0,0);
+            actuators.enableMotors(false);
+        } 
+        
+        else if (cmd == "CALIB") {
+            imu.calibrateMagnetometer();
+        }
+        
+        else {
+            Serial.printf("❓ Commande inconnue : %s\n", cmd.c_str());
+        }
+    }
+
+    // 3. Exécution de la tâche de navigation (Si active)
+    if (mission_active) {
+        static unsigned long last_time = millis();
+        static unsigned long last_telemetry_time = millis(); // ⏱️ Nouveau timer pour l'affichage
+        
+        unsigned long now = millis();
+        float dt = (now - last_time) / 1000.0;
+        
+        if (dt >= 0.02) { // Boucle de contrôle à 50Hz
+            last_time = now;
+            updateNavigationTask(dt); 
             
-            // Bonus : Si on reçoit "stop" par radio, on arrête les moteurs
-            if (cmd == "stop") {
-                actuators.setServoAngles(0, 0, 0, 0);
+            // --- 📡 ENVOI DE LA TÉLÉMÉTRIE (Toutes les 500 ms) ---
+            if (now - last_telemetry_time >= 500) {
+                last_telemetry_time = now;
+                
+                // Affichage de la position estimée par le Filtre de Kalman
+                Serial.printf("📍 NAV | X: %.2f m | Y: %.2f m | Cap: %5.1f° ", 
+                              ekf.X(0), ekf.X(1), ekf.X(2) * 180.0 / M_PI);
+                
+                // Si ton PathFollower a une variable publique pour l'index du point (ex: current_wp),
+                // tu peux l'afficher ici. (Adapte le nom de la variable si besoin)
+                // Serial.printf("| Cible WP: %d/%d ", follower.current_wp, PATH_SIZE);
+                
+                Serial.println(); // Retour à la ligne
+            }
+
+            // On vérifie si on est arrivé à la fin de la mission
+            if (follower.isDone()) {
+                Serial.println("\n✅ MISSION TERMINÉE AVEC SUCCÈS ! Objectif atteint.");
+                mission_active = false;
+                actuators.setStepperSpeeds(0,0,0,0,0,0);
+                actuators.enableMotors(false); // Optionnel : couper le courant pour refroidir
             }
         }
     }
+
 
     // --- PARTIE MENU SÉRIE ---
     if (Serial.available() > 0) {
@@ -314,11 +396,11 @@ void loop() {
                     imu.updateEulerAngles();
                     
                     // 3. Affichage global sur une seule ligne
-                    Serial.printf("Acc[X:%5.1f Y:%5.1f Z:%5.1f] | Gyr[X:%6.1f Y:%6.1f Z:%6.1f] | ROLL: %5.1f° | PITCH: %5.1f° | CAP: %5.1f°\n", 
-                                  imu.accX, imu.accY, imu.accZ, 
-                                  imu.gyroX, imu.gyroY, imu.gyroZ,
-                                  imu.roll, imu.pitch, imu.heading);
-                    
+                    Serial.printf("Acc[X:%5.1f Y:%5.1f Z:%5.1f] | Gyr[X:%5.1f Y:%5.1f Z:%5.1f] | Mag[X:%6d Y:%6d Z:%6d] | CAP:%5.1f°\n",
+                        imu.accX, imu.accY, imu.accZ,
+                        imu.gyroX, imu.gyroY, imu.gyroZ,
+                        imu.mag_x, imu.mag_y, imu.mag_z,
+                        imu.heading * 180.0/M_PI);
                     delay(100); // 10 lectures par seconde
                 }
                 break;

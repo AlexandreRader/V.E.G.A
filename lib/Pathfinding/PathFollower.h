@@ -1,6 +1,6 @@
 #pragma once
 #include <Arduino.h>
-#include "../../V.E.G.A/mission_export.h" // Le fichier généré par votre station sol Python
+#include "../../V.E.G.A/lib/Communication/mission.h"
 #include "../../include/config.h"
 
 // Structure pour renvoyer la consigne globale du robot

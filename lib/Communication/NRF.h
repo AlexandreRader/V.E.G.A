@@ -84,4 +84,5 @@ private:
 
     void _parseBuffer();
     void _enqueueCommand(const char* start, int len);
+    bool _parseMissionString(String payload);
 };

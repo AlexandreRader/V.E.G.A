@@ -56,27 +56,27 @@ public:
     }
 
     void readMotion() {
-        // Lecture Accéléromètre
+        // Lecture Accéléromètre (La librairie renvoie des milli-g !)
         acc_x = icm20600.getAccelerationX();
         acc_y = icm20600.getAccelerationY();
         acc_z = icm20600.getAccelerationZ();
 
-        // Conversion brute -> m/s² (1g = 16384 LSB. 1g = 9.81 m/s²)
-        accX = (float)acc_x * (9.81 / 16384.0);
-        accY = (float)acc_y * (9.81 / 16384.0);
-        accZ = (float)acc_z * (9.81 / 16384.0); // Réintégré
+        // Conversion mg -> m/s² (1000 mg = 1 g = 9.81 m/s²)
+        accX = (float)acc_x * (9.81 / 1000.0);
+        accY = (float)acc_y * (9.81 / 1000.0);
+        accZ = (float)acc_z * (9.81 / 1000.0);
 
-        // Lecture Gyroscope
-        float raw_gyroX = icm20600.getGyroscopeX(); // Réintégré
-        float raw_gyroY = icm20600.getGyroscopeY(); // Réintégré
+        // Lecture Gyroscope (La librairie renvoie déjà des dps !)
+        float raw_gyroX = icm20600.getGyroscopeX(); 
+        float raw_gyroY = icm20600.getGyroscopeY(); 
         float raw_gyroZ = icm20600.getGyroscopeZ() - gyro_offset_z;
 
-        // Conversion en rad/s (1 dps = 131 LSB)
-        gyroX = raw_gyroX * (M_PI / 180.0) / 131.0; // Réintégré
-        gyroY = raw_gyroY * (M_PI / 180.0) / 131.0; // Réintégré
-        gyroZ = raw_gyroZ * (M_PI / 180.0) / 131.0; 
+        // Conversion dps -> rad/s
+        gyroX = raw_gyroX * (M_PI / 180.0); 
+        gyroY = raw_gyroY * (M_PI / 180.0); 
+        gyroZ = raw_gyroZ * (M_PI / 180.0); 
 
-        // Lecture Magnétomètre (Avec offset manuel depuis config.h)
+        // Lecture Magnétomètre
         ak09918.getData(&mag_x, &mag_y, &mag_z);
         mag_x -= MAG_OFFSET_X;
         mag_y -= MAG_OFFSET_Y;

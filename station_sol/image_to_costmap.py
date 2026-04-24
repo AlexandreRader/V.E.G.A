@@ -35,6 +35,9 @@ class CostmapApp:
         self.root = root
         self.root.title("Station Sol - Éditeur de Mission VEGA SC317 (Planner Intégré)")
         self.root.geometry("1400x850") 
+
+        self.start_angle = tk.IntVar(value=0) # Angle en degrés
+        self.end_angle = tk.IntVar(value=0)   # Angle en degrés
         
         self.original_img = None
         self.warped_img = None
@@ -140,6 +143,19 @@ class CostmapApp:
 
         self.lbl_status = tk.Label(self.root, text="Statut : Prêt.", font=("Arial", 9), fg="#777")
         self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+
+        # Ajout des curseurs d'orientation en bas à droite
+        tk.Label(bottom_right, text=" | Cap Départ A (°):").pack(side=tk.LEFT, padx=(10,0))
+        tk.Scale(bottom_right, from_=-180, to=180, orient=tk.HORIZONTAL, variable=self.start_angle, length=100, showvalue=1, command=lambda v: self.update_costmap_canvas()).pack(side=tk.LEFT)
+        
+        tk.Label(bottom_right, text=" Cap Arrivée B (°):").pack(side=tk.LEFT, padx=(10,0))
+        tk.Scale(bottom_right, from_=-180, to=180, orient=tk.HORIZONTAL, variable=self.end_angle, length=100, showvalue=1, command=lambda v: self.update_costmap_canvas()).pack(side=tk.LEFT)
+
+        # Ajout des curseurs d'orientation en bas à droite
+        tk.Label(bottom_right, text=" | Cap Départ A (°):").pack(side=tk.LEFT, padx=(10,0))
+        tk.Scale(bottom_right, from_=-180, to=180, orient=tk.HORIZONTAL, variable=self.start_angle, length=100, showvalue=1).pack(side=tk.LEFT)
+        tk.Label(bottom_right, text=" Cap Arrivée B (°):").pack(side=tk.LEFT, padx=(10,0))
+        tk.Scale(bottom_right, from_=-180, to=180, orient=tk.HORIZONTAL, variable=self.end_angle, length=100, showvalue=1).pack(side=tk.LEFT)
 
     # === METHODES IMAGE (Inchangées) ===
     def get_display_image(self, img):
@@ -393,28 +409,65 @@ class CostmapApp:
         self.lbl_status.config(text="Perspective redressée (Ordre fixe : BG, HG, HD, BD)")
 
     def process_image(self):
-        if self.warped_img is None: return
-        gray = cv2.cvtColor(self.warped_img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-        edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        binary_obstacles = np.zeros_like(gray)
-        min_a = self.min_area.get()
-        for cnt in contours:
-            if cv2.contourArea(cnt) > min_a:
-                cv2.drawContours(binary_obstacles, [cnt], -1, 255, thickness=cv2.FILLED)
-        
-        small_binary = cv2.resize(binary_obstacles, (GRID_W, GRID_H), interpolation=cv2.INTER_NEAREST)
-        free_space = cv2.bitwise_not(small_binary) 
-        dist = cv2.distanceTransform(free_space, cv2.DIST_L2, 3)
-        
-        self.costmap_grid = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
-        robot_radius_cells = (ROBOT_WIDTH_CM / 2.0) / CELL_SIZE_CM
-        safe_margin_cells = SAFE_MARGIN_CM / CELL_SIZE_CM
-        max_dist_cells = robot_radius_cells + safe_margin_cells
+        # 1. Vérification de l'étape précédente
+        if getattr(self, 'warped_img', None) is None: 
+            messagebox.showwarning("Attention", "Vous devez d'abord redresser l'image (Étape 2) !")
+            return
+
+        try:
+            self.lbl_status.config(text="Génération de la costmap en cours...")
+            self.root.update()
+
+            gray = cv2.cvtColor(self.warped_img, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+            edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+            
+            # Gestion de compatibilité OpenCV 3 et 4
+            contour_results = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours = contour_results[0] if len(contour_results) == 2 else contour_results[1]
+            
+            binary_obstacles = np.zeros_like(gray)
+            min_a = self.min_area.get()
+            obstacles_trouves = 0
+
+            for cnt in contours:
+                if cv2.contourArea(cnt) > min_a:
+                    cv2.drawContours(binary_obstacles, [cnt], -1, 255, thickness=cv2.FILLED)
+                    obstacles_trouves += 1
+            
+            if obstacles_trouves == 0:
+                messagebox.showinfo("Information", "Aucun obstacle détecté. Baissez le 'Filtre' ou modifiez la sensibilité.")
+
+            small_binary = cv2.resize(binary_obstacles, (GRID_W, GRID_H), interpolation=cv2.INTER_NEAREST)
+            free_space = cv2.bitwise_not(small_binary) 
+            dist = cv2.distanceTransform(free_space, cv2.DIST_L2, 3)
+            
+            self.costmap_grid = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
+            robot_radius_cells = (ROBOT_WIDTH_CM / 2.0) / CELL_SIZE_CM
+            safe_margin_cells = SAFE_MARGIN_CM / CELL_SIZE_CM
+            max_dist_cells = robot_radius_cells + safe_margin_cells
+            
+            for y in range(GRID_H):
+                for x in range(GRID_W):
+                    d = dist[y, x]
+                    if d <= robot_radius_cells:
+                        self.costmap_grid[y, x] = 255 
+                    elif d < max_dist_cells:
+                        fraction = (d - robot_radius_cells) / safe_margin_cells
+                        self.costmap_grid[y, x] = int(254 * (1.0 - fraction)) 
+                    else:
+                        self.costmap_grid[y, x] = 0 
+            
+            self.start_pos, self.end_pos, self.current_path = None, None, []
+            self.update_costmap_canvas()
+            self.lbl_status.config(text=f"Costmap générée ({obstacles_trouves} obstacles).")
+
+        except Exception as e:
+            # S'il y a un vrai crash mathématique ou mémoire, il s'affichera ici !
+            messagebox.showerror("Erreur critique Costmap", f"Le calcul a échoué :\n{str(e)}")
+            self.lbl_status.config(text="Erreur Costmap.")
         
         for y in range(GRID_H):
             for x in range(GRID_W):
@@ -579,6 +632,37 @@ class CostmapApp:
             self.canvas_cost.create_oval(cx-6, cy-6, cx+6, cy+6, fill="#FFFFFF", outline="black", width=2)
             self.canvas_cost.create_text(cx, cy-12, text="B", fill="#FFFFFF", font=("Arial", 10, "bold"))
 
+        # Dessins UI (A et B) avec Flèches d'orientation
+        arrow_length = 30  # Longueur de la flèche en pixels
+
+        if self.start_pos:
+            cx = self.start_pos[0] * SCALE_UI + (SCALE_UI//2)
+            cy = self.start_pos[1] * SCALE_UI + (SCALE_UI//2)
+            
+            # Calcul de la pointe de la flèche (Trigonométrie)
+            # (Attention: sur un écran d'ordinateur, l'axe Y va vers le bas, on utilise -sin pour inverser)
+            theta_start = np.radians(self.start_angle.get())
+            ex = cx + arrow_length * np.cos(theta_start)
+            ey = cy - arrow_length * np.sin(theta_start) 
+
+            # Dessin de la flèche et du point
+            self.canvas_cost.create_line(cx, cy, ex, ey, fill="#00FF00", width=3, arrow=tk.LAST)
+            self.canvas_cost.create_oval(cx-6, cy-6, cx+6, cy+6, fill="#00FF00", outline="white", width=2)
+            self.canvas_cost.create_text(cx, cy-15, text="A", fill="#00FF00", font=("Arial", 11, "bold"))
+
+        if self.end_pos:
+            cx = self.end_pos[0] * SCALE_UI + (SCALE_UI//2)
+            cy = self.end_pos[1] * SCALE_UI + (SCALE_UI//2)
+            
+            theta_end = np.radians(self.end_angle.get())
+            ex = cx + arrow_length * np.cos(theta_end)
+            ey = cy - arrow_length * np.sin(theta_end)
+
+            # Dessin de la flèche et du point
+            self.canvas_cost.create_line(cx, cy, ex, ey, fill="#FFFFFF", width=3, arrow=tk.LAST)
+            self.canvas_cost.create_oval(cx-6, cy-6, cx+6, cy+6, fill="#FFFFFF", outline="black", width=2)
+            self.canvas_cost.create_text(cx, cy-15, text="B", fill="#FFFFFF", font=("Arial", 11, "bold"))
+
     def on_costmap_mouse(self, event):
         if self.costmap_grid is None: return
         mode = self.right_tool_mode.get()
@@ -612,62 +696,52 @@ class CostmapApp:
             self.current_path = [] # Reset chemin si on modifie la map
             self.update_costmap_canvas()
 
-# === NOUVEL EXPORT (Avec Point de Départ, Arrivée et Orientation) ===
     def export_code(self):
         if not self.current_path or not self.start_pos or not self.end_pos: 
             messagebox.showerror("Erreur", "Veuillez d'abord calculer une trajectoire avec A et B.")
             return
 
-        # 1. Conversion des points A et B en mètres
+        # Conversion en mètres et radians
         start_x = self.start_pos[0] * (CELL_SIZE_CM / 100.0)
         start_y = self.start_pos[1] * (CELL_SIZE_CM / 100.0)
+        start_theta = np.radians(self.start_angle.get())
         
         goal_x = self.end_pos[0] * (CELL_SIZE_CM / 100.0)
         goal_y = self.end_pos[1] * (CELL_SIZE_CM / 100.0)
+        goal_theta = np.radians(self.end_angle.get())
 
-        # 2. Calcul de l'orientation initiale (Regard pointé vers le cap suivant)
-        start_theta = 0.0
-        if len(self.current_path) > 1:
-            # On prend le 1er et le 2ème point du chemin calculé
-            p0 = self.current_path[0]
-            p1 = self.current_path[1]
-            dx = (p1[0] - p0[0]) * (CELL_SIZE_CM / 100.0)
-            dy = (p1[1] - p0[1]) * (CELL_SIZE_CM / 100.0)
-            start_theta = np.arctan2(dy, dx)
-
-        # 3. Génération du code C++
-        cpp_code = f"// ==========================================\n"
-        cpp_code += f"// MISSION VEGA SC317 - TRAJECTOIRE A*\n"
-        cpp_code += f"// ==========================================\n\n"
-        cpp_code += f"#ifndef MISSION_EXPORT_H\n#define MISSION_EXPORT_H\n\n"
+        # Création de l'entête : M[startX],[startY],[startT],[goalX],[goalY],[goalT];
+        mission_str = f"M{start_x:.2f},{start_y:.2f},{start_theta:.2f},{goal_x:.2f},{goal_y:.2f},{goal_theta:.2f};"
         
-        cpp_code += f"// --- Points clés de la mission ---\n"
-        cpp_code += f"const float START_X = {start_x:.3f};\n"
-        cpp_code += f"const float START_Y = {start_y:.3f};\n"
-        cpp_code += f"const float START_THETA = {start_theta:.3f}; // Angle initial (radians)\n\n"
-        
-        cpp_code += f"const float GOAL_X = {goal_x:.3f};\n"
-        cpp_code += f"const float GOAL_Y = {goal_y:.3f};\n\n"
-        
-        cpp_code += f"// --- Trajectoire ---\n"
-        cpp_code += f"struct Waypoint {{\n    float x; // mètres\n    float y; // mètres\n}};\n\n"
-        
-        cpp_code += f"const int PATH_SIZE = {len(self.current_path)};\n"
-        cpp_code += f"const Waypoint MISSION_PATH[PATH_SIZE] = {{\n"
-        
+        # Ajout des waypoints
         for p in self.current_path:
             real_x = p[0] * (CELL_SIZE_CM / 100.0)
             real_y = p[1] * (CELL_SIZE_CM / 100.0)
-            cpp_code += f"    {{{real_x:.3f}f, {real_y:.3f}f}},\n"
+            mission_str += f"{real_x:.2f},{real_y:.2f};"
             
-        cpp_code += "};\n\n#endif\n"
+        self.show_export_dialog(mission_str)
+
+    # --- Nouvelle fonction pour afficher une fenêtre de copie rapide ---
+    def show_export_dialog(self, mission_str):
+        top = tk.Toplevel(self.root)
+        top.title("🚀 Mission Prête !")
+        top.geometry("600x200")
         
-        # 4. Sauvegarde
-        export_path = os.path.join(os.path.dirname(__file__), "mission_export.h")
-        with open(export_path, "w") as f:
-            f.write(cpp_code)
-            
-        messagebox.showinfo("Export Réussi", f"Trajectoire de {len(self.current_path)} points exportée avec coordonnées de départ !")
+        # Avertissement sur la longueur
+        char_count = len(mission_str)
+        info_text = f"Copiez cette ligne et collez-la dans le Moniteur Série.\nLongueur : {char_count} caractères."
+        tk.Label(top, text=info_text, font=("Arial", 10, "bold")).pack(pady=10)
+        
+        # Zone de texte
+        text_area = tk.Text(top, height=5, wrap=tk.WORD, font=("Consolas", 10))
+        text_area.pack(padx=20, pady=5, fill=tk.BOTH, expand=True)
+        text_area.insert(tk.END, mission_str)
+        
+        # Sélectionne tout le texte automatiquement pour gagner du temps
+        text_area.tag_add("sel", "1.0", "end")
+        text_area.focus_set()
+        
+        tk.Button(top, text="Fermer", command=top.destroy).pack(pady=10)
 
 if __name__ == "__main__":
     root = tk.Tk()
