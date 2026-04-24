@@ -42,20 +42,20 @@ public:
     bool begin() {
         Serial.println("Initialisation capteurs ToF...");
 
-        tof_front_left = new VL53LX(&Wire, PIN_TOF_1_AVANT);
-        tof_front_right = new VL53LX(&Wire, PIN_TOF_2_ARRIERE);
-        tof_rear_left = new VL53LX(&Wire, PIN_TOF_3_GAUCHE);
-        tof_rear_right = new VL53LX(&Wire, PIN_TOF_4_DROITE);
+        tof_front_left = new VL53LX(&Wire, PIN_TOF_1_LT);
+        tof_front_right = new VL53LX(&Wire, PIN_TOF_2_RT);
+        tof_rear_left = new VL53LX(&Wire, PIN_TOF_3_LB);
+        tof_rear_right = new VL53LX(&Wire, PIN_TOF_4_RB);
 
         // EXTINCTION FORCÉE MANUELLE
-        pinMode(PIN_TOF_1_AVANT, OUTPUT); digitalWrite(PIN_TOF_1_AVANT, LOW);
-        pinMode(PIN_TOF_2_ARRIERE, OUTPUT); digitalWrite(PIN_TOF_2_ARRIERE, LOW);
-        pinMode(PIN_TOF_3_GAUCHE, OUTPUT); digitalWrite(PIN_TOF_3_GAUCHE, LOW);
-        pinMode(PIN_TOF_4_DROITE, OUTPUT); digitalWrite(PIN_TOF_4_DROITE, LOW);
+        pinMode(PIN_TOF_1_LT, OUTPUT); digitalWrite(PIN_TOF_1_LT, LOW);
+        pinMode(PIN_TOF_2_RT, OUTPUT); digitalWrite(PIN_TOF_2_RT, LOW);
+        pinMode(PIN_TOF_3_LB, OUTPUT); digitalWrite(PIN_TOF_3_LB, LOW);
+        pinMode(PIN_TOF_4_RB, OUTPUT); digitalWrite(PIN_TOF_4_RB, LOW);
         delay(100); 
 
         // --- Capteur 1 ---
-        digitalWrite(PIN_TOF_1_AVANT, HIGH); delay(20);
+        digitalWrite(PIN_TOF_1_LT, HIGH); delay(20);
         Wire.beginTransmission(0x29);
         if (Wire.endTransmission() == 0) {
             // 0x54 est l'adresse 8-bit ST (équivaut à 0x2A en 7-bit)
@@ -69,12 +69,12 @@ public:
             }
         }
         if (!active[0]) {
-            digitalWrite(PIN_TOF_1_AVANT, LOW);
+            digitalWrite(PIN_TOF_1_LT, LOW);
             Serial.println(" - ToF Avant Gauche : ❌ ECHEC");
         }
 
         // --- Capteur 2 ---
-        digitalWrite(PIN_TOF_2_ARRIERE, HIGH); delay(20);
+        digitalWrite(PIN_TOF_2_RT, HIGH); delay(20);
         Wire.beginTransmission(0x29);
         if (Wire.endTransmission() == 0) {
             if (tof_front_right->InitSensor(0x56) == VL53LX_ERROR_NONE) {
@@ -86,12 +86,12 @@ public:
             }
         }
         if (!active[1]) {
-            digitalWrite(PIN_TOF_2_ARRIERE, LOW);
+            digitalWrite(PIN_TOF_2_RT, LOW);
             Serial.println(" - ToF Avant Droit  : ❌ ECHEC");
         }
 
         // --- Capteur 3 ---
-        digitalWrite(PIN_TOF_3_GAUCHE, HIGH); delay(20);
+        digitalWrite(PIN_TOF_3_LB, HIGH); delay(20);
         Wire.beginTransmission(0x29);
         if (Wire.endTransmission() == 0) {
             if (tof_rear_left->InitSensor(0x58) == VL53LX_ERROR_NONE) {
@@ -103,12 +103,12 @@ public:
             }
         }
         if (!active[2]) {
-            digitalWrite(PIN_TOF_3_GAUCHE, LOW);
+            digitalWrite(PIN_TOF_3_LB, LOW);
             Serial.println(" - ToF Arr Gauche   : ❌ ECHEC");
         }
 
         // --- Capteur 4 ---
-        digitalWrite(PIN_TOF_4_DROITE, HIGH); delay(20);
+        digitalWrite(PIN_TOF_4_RB, HIGH); delay(20);
         Wire.beginTransmission(0x29);
         if (Wire.endTransmission() == 0) {
             if (tof_rear_right->InitSensor(0x5A) == VL53LX_ERROR_NONE) {
@@ -120,7 +120,7 @@ public:
             }
         }
         if (!active[3]) {
-            digitalWrite(PIN_TOF_4_DROITE, LOW);
+            digitalWrite(PIN_TOF_4_RB, LOW);
             Serial.println(" - ToF Arr Droit    : ❌ ECHEC");
         }
 

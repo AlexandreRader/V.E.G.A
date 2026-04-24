@@ -19,10 +19,10 @@
 #define PIN_RADIO_CE  14
 
 // --- CAPTEURS TOF (Broches XSHUT) ---
-#define PIN_TOF_1_AVANT   6
-#define PIN_TOF_2_ARRIERE 7
-#define PIN_TOF_3_GAUCHE  8
-#define PIN_TOF_4_DROITE  9
+#define PIN_TOF_1_LT   6 // left top
+#define PIN_TOF_2_RT   7 // right top
+#define PIN_TOF_3_LB  8 // left bottom
+#define PIN_TOF_4_RB  9 // right bottom
 
 // --- PROPULSION (Steppers M1 à M6) ---
 #define PIN_ENABLE_MOTORS 47
