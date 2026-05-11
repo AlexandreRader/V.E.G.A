@@ -4,6 +4,15 @@
 #include <vl53lx_class.h>
 #include "pins.h"
 
+// 1. Définition des types d'obstacles
+enum ObstacleSignature {
+    OBSTACLE_NONE,       // Voie libre
+    OBSTACLE_PASSABLE,   // Franchissable (ex: petit caillou)
+    OBSTACLE_WALL,       // Mur infranchissable
+    OBSTACLE_SLOPE       // Pente montante
+};
+
+
 // ==========================================
 // GESTION CAPTEURS ToF - VEGA SC317
 // ==========================================
@@ -233,6 +242,41 @@ public:
             }
         }
         return false;
+    }
+
+    // 2. La NOUVELLE fonction "Cerveau" du capteur
+    ObstacleSignature getObstacleSignature() {
+        // On lit les distances en millimètres et on convertit en mètres (/1000.0)
+        // Hypothèse : Front = Capteurs du Haut, Rear = Capteurs du Bas
+        float dist_TL = getFrontLeftDistance() / 1000.0; 
+        float dist_TR = getFrontRightDistance() / 1000.0;
+        float dist_BL = getRearLeftDistance() / 1000.0;
+        float dist_BR = getRearRightDistance() / 1000.0;
+
+        float avg_top = (dist_TL + dist_TR) / 2.0;
+        float avg_bot = (dist_BL + dist_BR) / 2.0;
+
+        // Voie libre (> 1m devant)
+        if (avg_bot > 1.0 && avg_top > 1.0) return OBSTACLE_NONE;
+
+        // Mur Infranchissable (L'écart haut/bas est très faible, ex: < 10cm)
+        if (abs(avg_top - avg_bot) < 0.10 && avg_bot < 0.80) return OBSTACLE_WALL;
+
+        // Franchissable (Le bas détecte quelque chose à < 30cm, le haut voit loin)
+        if (avg_bot < 0.30 && avg_top > 0.80) return OBSTACLE_PASSABLE;
+
+        // Pente (Le bas se rapproche, le haut aussi mais reste plus loin)
+        if (avg_bot < 0.80 && avg_top < 1.0 && avg_top > avg_bot) return OBSTACLE_SLOPE;
+
+        return OBSTACLE_NONE;
+    }
+
+    // 3. Fonction pour simplifier le Navigation.h
+    float getMinFrontDistance() {
+        // Retourne la plus petite distance lue sur les capteurs du bas (en mètres)
+        float dist_BL = getRearLeftDistance() / 1000.0;
+        float dist_BR = getRearRightDistance() / 1000.0;
+        return min(dist_BL, dist_BR);
     }
 
 };

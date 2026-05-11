@@ -36,6 +36,8 @@ private:
     float robot_x, robot_y, robot_theta;
     float current_v, current_w;
 
+    ObstacleSignature current_obstacle;
+
     // Paramètres de navigation
     const float OBSTACLE_SLOWDOWN_DISTANCE = 0.8;  // 80cm
     const float OBSTACLE_STOP_DISTANCE = 0.3;      // 30cm
@@ -140,6 +142,9 @@ public:
     // Mise à jour de l'état du robot
     void updateRobotState(float dt) {
         // 1. Vérification des arrêts d'urgence
+
+        current_obstacle = tof_sensors.getObstacleSignature();
+
         if (tof_sensors.emergencyStopRequired()) {
             current_state = STATE_EMERGENCY_STOP;
             current_v = 0;
@@ -170,9 +175,9 @@ public:
                 }
 
                 // Vérification d'obstacles
-                if (tof_sensors.hasObstacleFront()) {
+                if (current_obstacle == OBSTACLE_WALL) {
                     current_state = STATE_OBSTACLE_AVOIDANCE;
-                    Serial.println("⚠️  Obstacle détecté - Évitement");
+                    Serial.println("⚠️  Mur détecté - Évitement");
                 }
                 break;
 
@@ -202,16 +207,26 @@ public:
     void computeMotionCommands() {
         switch (current_state) {
             case STATE_NAVIGATING: {
-                // Utilisation du PathFollower
                 VelocityCommand cmd = path_follower.update(robot_x, robot_y, robot_theta);
 
-                // Adaptation selon obstacles
-                float front_dist = tof_sensors.getMinFrontDistance();
-                if (front_dist < OBSTACLE_SLOWDOWN_DISTANCE) {
-                    cmd.linear_v *= 0.5;  // Ralentissement
+                // 🎯 1. Demande à la Perception ce qu'elle voit
+                ObstacleSignature obstacle = tof_sensors.getObstacleSignature();
+
+                // 🎯 2. Prend une Décision basée sur la Perception
+                if (obstacle == OBSTACLE_PASSABLE) {
+                    cmd.linear_v *= 0.4; // On ralentit pour franchir doucement
+                } 
+                else if (obstacle == OBSTACLE_SLOPE) {
+                    cmd.linear_v *= 0.8; // On ralentit un peu sur la pente
                 }
-                if (front_dist < OBSTACLE_STOP_DISTANCE) {
-                    cmd.linear_v = 0;  // Arrêt
+                else if (obstacle == OBSTACLE_WALL) {
+                    float front_dist = tof_sensors.getMinFrontDistance();
+                    if (front_dist < OBSTACLE_SLOWDOWN_DISTANCE) {
+                        cmd.linear_v *= 0.5;  // On freine à l'approche du mur
+                    }
+                    if (front_dist < OBSTACLE_STOP_DISTANCE) {
+                        cmd.linear_v = 0;     // Arrêt total
+                    }
                 }
 
                 current_v = cmd.linear_v;
@@ -293,12 +308,13 @@ public:
     // Évitement d'obstacle (implémentation basique)
     void performObstacleAvoidance() {
         // Logique simple: tourner jusqu'à dégagement
-        if (!tof_sensors.hasObstacleFront()) {
+        // Si ce n'est PLUS un mur infranchissable, on reprend la route !
+        if (tof_sensors.getObstacleSignature() != OBSTACLE_WALL) {
             current_state = STATE_NAVIGATING;
-            Serial.println("✅ Obstacle évité - Reprise navigation");
+            Serial.println("✅ Voie dégagée - Reprise navigation");
         } else {
             current_v = 0;
-            current_w = 0.3;  // Rotation lente
+            current_w = 0.3;  // Rotation lente pour chercher un passage
         }
     }
 
