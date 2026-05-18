@@ -48,64 +48,105 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
         dy = target.y - current_y;
     }
 
-// 4. Calculer l'erreur de cap (Heading Error)
-    // On utilise dy, dx dans l'ordre standard (Y en premier)
+    // 4. Calculer l'erreur de cap (Heading Error)
     float target_angle = atan2(dy, dx); 
-
-    // ❌ ON SUPPRIME CETTE LIGNE QUI FAUSSAIT LA CIBLE DE 180° :
-    // target_angle = M_PI / 2.0 - target_angle; 
-
-    // Calcul de l'erreur d'angle brute
     float angle_error = target_angle - current_theta;
 
-    // 🎯 NORMALISATION ANTI ZIG-ZAG
+    // Normalisation anti-enroulement entre -PI et PI
     while (angle_error > M_PI) angle_error -= 2.0 * M_PI;
     while (angle_error < -M_PI) angle_error += 2.0 * M_PI;
 
-    // ... (Le reste du code reste identique avec la Deadband et le Debug) ...
-    
-    // === ASTUCE DE DÉBOGAGE ABSOLUE ===
-    // Imprime ces valeurs pour voir si l'erreur d'angle tombe bien autour de zéro !
-    // Serial.printf("Cible: %.1f° | Actuel: %.1f° | Erreur: %.1f°\n", 
-    //               target_angle * 180/M_PI, current_theta * 180/M_PI, angle_error * 180/M_PI);
-    // ==================================
+    // 🔍 DEBUG: Affichage complet de l'état de navigation
+    static unsigned long last_debug_print = 0;
+    if (millis() - last_debug_print > 500) {
+        Serial.printf("📊 [PF] WP[%d]: (%.2f,%.2f) | Dist:%.2f | TargetAng:%.1f° | CurrHeading:%.1f° | Error:%+.1f°\n",
+                      currentIndex, target.x, target.y, distance,
+                      target_angle * 180.0 / M_PI, 
+                      current_theta * 180.0 / M_PI,
+                      angle_error * 180.0 / M_PI);
+        last_debug_print = millis();
+    }
 
-    // 5. Générer les commandes de vitesse
-    
-    // Tolérance élargie à 3 degrés (~0.052 rad)
-    float tolerance_angle = 0.052; 
+    float tolerance_angle = 0.1; // Tolérance en ligne droite (~3 degrés)
 
-    if (abs(angle_error) > 0.35) { 
-    // Pivot sur place (Erreur > 20°)
-    cmd.linear_v = 0.0; 
-    
-    // 🛑 ON BRIDE ICI : On passe de 0.8 à 0.25 pour que le robot tourne très lentement et s'arrête pile sur l'axe
-    cmd.angular_w = constrain(-Kp_ANGULAR * angle_error, -0.25, 0.25);
-}
-    else {
-        // Zone de validation
-        if (abs(angle_error) <= tolerance_angle) {
-            cmd.linear_v = TARGET_SPEED_MS; 
-            cmd.angular_w = 0.0;            
-        } 
-        else {
-            // Roulage et correction douce
-            float speed_factor = cos(angle_error);
-            cmd.linear_v = TARGET_SPEED_MS * speed_factor;
-            
-            // 🎯 ON INVERSE LE VOLANT ICI AUSSI (Ajout du signe -)
-            cmd.angular_w = constrain(-Kp_ANGULAR * angle_error, -0.3, 0.3);
+    // ==========================================================
+    // 🎯 AUTOMATE À ÉTATS AVEC HYSTÉRÉSIS (Anti-tremblement)
+    // ==========================================================
+    static bool in_pivot_mode = false;
+    static unsigned long pivot_start_time = 0; // Timeout pour éviter de rester bloqué
+    const unsigned long PIVOT_TIMEOUT_MS = 3000; // 3 secondes max en pivot
+
+    if (in_pivot_mode) {
+        // On reste en pivot sur place tant qu'on n'est pas aligné à moins de 5° (0.087 rad)
+        if (abs(angle_error) < 0.087) {
+            in_pivot_mode = false;
+            Serial.println("🎯 [PathFollower] Cap aligné ! Passage en mode roulage.");
+        }
+        // ESCAPE: Si on a pivoté pendant 3 sec sans se stabiliser, force passage en roulage
+        else if (millis() - pivot_start_time > PIVOT_TIMEOUT_MS) {
+            in_pivot_mode = false;
+            Serial.printf("⚠️ [PathFollower] TIMEOUT PIVOT ! Erreur: %.1f°. Passage forcé en roulage.\n", 
+                         angle_error * 180.0 / M_PI);
+        }
+    } else {
+        // On ne déclenche un pivot sur place que si l'erreur dépasse 35° (0.61 rad)
+        if (abs(angle_error) > 0.61) {
+            in_pivot_mode = true;
+            pivot_start_time = millis(); // Enregistre le début du pivot
+            Serial.println("🔄 [PathFollower] Écart important ! Déclenchement Pivot sur place.");
         }
     }
 
-    // ==========================================
-    // 🛑 RADAR DE DÉBOGAGE ABSOLU (À LAISSER POUR LE TEST)
-    // ==========================================
-    //Serial.printf("🎯 Cible: %.1f° | Err: %.1f° | Vitesse (v): %.2f | Angle (w): %.2f\n", 
-     //             target_angle * (180.0 / M_PI), 
-     //             angle_error * (180.0 / M_PI), 
-      //            cmd.linear_v, 
-      //           cmd.angular_w);
+    // ==========================================================
+    // GÉNÉRATION DES COMMANDES SELON LE MODE STABILISÉ
+    // ==========================================================
+    if (in_pivot_mode) {
+        // Pivot pur : Vitesse d'avance nulle pour laisser travailler la direction
+        cmd.linear_v = 0.0; 
+        cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.5, 0.5);
+        // Debug: Affiche une fois par seconde
+        static unsigned long last_mode_print = 0;
+        if (millis() - last_mode_print > 1000) {
+            Serial.printf("🔄 [PF MODE] PIVOT | AngularW: %.3f rad/s\n", cmd.angular_w);
+            last_mode_print = millis();
+        }
+    } 
+    else {
+        // Mode Roulage : Le robot est globalement dans le bon axe
+        if (abs(angle_error) <= tolerance_angle) {
+            // Ligne droite parfaite
+            cmd.linear_v = TARGET_SPEED_MS; 
+            cmd.angular_w = 0.0;
+            static unsigned long last_straight_print = 0;
+            if (millis() - last_straight_print > 1000) {
+                Serial.printf("➡️  [PF MODE] STRAIGHT | V: %.2f m/s\n", cmd.linear_v);
+                last_straight_print = millis();
+            }
+        } 
+        else {
+            // Correction douce en roulant
+            float speed_factor = cos(angle_error);
+            // 🔴 SÉCURITÉ: Ne JAMAIS faire marcher le robot en arrière à cause de l'angle
+            // Si speed_factor < 0, cela veut dire qu'on essaie de tourner > 90°
+            // Dans ce cas, on remet à zéro le mode et on force un pivot
+            if (speed_factor < 0.0) {
+                in_pivot_mode = true;
+                pivot_start_time = millis();
+                cmd.linear_v = 0.0;
+                cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.5, 0.5);
+                Serial.printf("🔴 [PF] SAFEGUARD: cos(angle_error)=%.2f < 0! Force PIVOT mode\n", speed_factor);
+            } else {
+                cmd.linear_v = TARGET_SPEED_MS * speed_factor;
+                cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.25, 0.25);
+                static unsigned long last_curve_print = 0;
+                if (millis() - last_curve_print > 1000) {
+                    Serial.printf("↗️  [PF MODE] CURVE | V: %.2f m/s | W: %.3f rad/s | Factor: %.2f\n", 
+                                  cmd.linear_v, cmd.angular_w, speed_factor);
+                    last_curve_print = millis();
+                }
+            }
+        }
+    }
                   
     return cmd;
 }

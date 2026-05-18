@@ -6,7 +6,7 @@ import os
 # --- CONFIGURATION (Basée sur votre matériel) ---
 CHECKERBOARD = (7, 7)  # Intersections internes (pour votre plateau 8x8 cases)
 SQUARE_SIZE = 25       # Taille réelle d'une case en mm (facultatif, aide à l'échelle)
-IMAGES_PATH = "/camera_calibration/*.jpg"  # Chemin vers vos images (ex: "images/*.jpg")
+IMAGES_PATH = "/home/wankeur/Documents/Code/Github/V.E.G.A/station_sol/camera_calibrationImages"  # Chemin vers vos images (ex: "images/*.jpg")
 
 def calibrate_and_verify():
     # Critères de précision pour l'affinage des coins

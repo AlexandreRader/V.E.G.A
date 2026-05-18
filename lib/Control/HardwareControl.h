@@ -19,7 +19,7 @@ private:
 
     bool motors_enabled;
     
-    // --- RÉINTÉGRÉ : Pour mémoriser les vitesses et les afficher dans printStatus() ---
+    // --- Pour mémoriser les vitesses et les afficher dans printStatus() ---
     float current_speeds_hz[6]; 
 
     const uint8_t PIN_STEP[6] = {PIN_STEP_M1, PIN_STEP_M2, PIN_STEP_M3, PIN_STEP_M4, PIN_STEP_M5, PIN_STEP_M6};
@@ -59,7 +59,7 @@ public:
         return true;
     }
 
-    // --- NOUVEAU : Déplacement relatif (ex: faire X pas) ---
+    // --- Déplacement relatif (ex: faire X pas) ---
     void moveRelative(int motor_index, long steps, uint32_t speed_hz) {
         if (motor_index < 0 || motor_index > 5 || !steppers[motor_index]) return;
         
@@ -67,7 +67,7 @@ public:
         steppers[motor_index]->move(steps);
     }
 
-    // --- NOUVEAU : Vérifier si un moteur tourne encore ---
+    // --- Vérifier si un moteur tourne encore ---
     bool isMotorMoving(int motor_index) {
         if (motor_index < 0 || motor_index > 5 || !steppers[motor_index]) return false;
         return steppers[motor_index]->isRunning();
@@ -106,7 +106,6 @@ public:
     // --- Lecture directe de l'odométrie matérielle ---
     long getStepCount(int motor_index) {
         if (motor_index < 0 || motor_index > 5 || !steppers[motor_index]) return 0;
-        // La librairie compte automatiquement les pas en positif et négatif !
         return steppers[motor_index]->getCurrentPosition(); 
     }
 
@@ -115,7 +114,8 @@ public:
             if (steppers[i]) steppers[i]->setCurrentPosition(0);
         }
     }
-// Contrôle des servos (angles en radians)
+
+    // Contrôle des servos (angles en radians)
     void setServoAngles(float fl, float fr, float rl, float rr) {
         
         // 1. Calcul des angles individuels avec leurs inversions et offsets
@@ -124,7 +124,7 @@ public:
         int angle_rl = constrain((rl * DIR_SERVO_RL * 180.0 / M_PI) + 90 + OFFSET_SERVO_RL, 0, 180);
         int angle_rr = constrain((rr * DIR_SERVO_RR * 180.0 / M_PI) + 90 + OFFSET_SERVO_RR, 0, 180);
 
-        // 2. Envoi sur le BON port physique sans se poser de questions
+        // 2. Envoi sur le BON port physique
         pwm.setAngle(PORT_SERVO_FL, angle_fl);  
         pwm.setAngle(PORT_SERVO_FR, angle_fr);  
         pwm.setAngle(PORT_SERVO_RL, angle_rl);  
@@ -158,4 +158,14 @@ public:
         Serial.println("========================");
     }
 
+    // 🎯 CODE CORRIGÉ : Utilise la bonne syntaxe de ta bibliothèque ServoDriver/PCA9685
+    void relaxServos() {
+        Serial.println("💤 Servos en mode repos (Signal PWM coupé).");
+        
+        // On force les timestamps ON et OFF à 0 pour éteindre complètement le signal de chaque pin
+        pwm.setPwm(PORT_SERVO_FL, 0, 0); 
+        pwm.setPwm(PORT_SERVO_FR, 0, 0);
+        pwm.setPwm(PORT_SERVO_RL, 0, 0);
+        pwm.setPwm(PORT_SERVO_RR, 0, 0);
+    }
 };

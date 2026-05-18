@@ -160,6 +160,7 @@ void modeTerminalSerie() {
                 mission_active = false;
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
                 actuators.enableMotors(false);
+                actuators.relaxServos();
             }
         } else if (!mission_active) {
             last_time = now; // Évite un bond dans le temps au démarrage
@@ -193,6 +194,7 @@ void modeTerminalSerie() {
                 mission_active = false;
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
                 actuators.enableMotors(false);
+                actuators.relaxServos();
             }
             else if (cmd.charAt(0) == 'M' || cmd.charAt(0) == 'm') {
                 Serial.println("📡 Trajectoire reçue via Serial. Décodage...");
@@ -409,28 +411,33 @@ void updateNavigationTask(float dt) {
 
         ekf.predict(measured_vx, measured_omega, dt);
     } else {
-        // --- MODE RÉEL (SANS ACCÉLÉROMÈTRE) ---
+        // --- MODE RÉEL (SANS ACCÉLÉROMÈTRE ET SANS HACHAGE GYRO) ---
         imu.readMotion();
         imu.updateEulerAngles();
         tof.update(); 
 
-        // 🎯 LOGIQUE ANTI-DRIFT PIVOT : 
-        // Si la vitesse de rotation commandée (sim_omega) ou physique (imu.gyroZ) est significative,
-        // c'est que le robot pivote sur lui-même. Sa vitesse d'avance réelle est donc strictement nulle.
-        if (abs(sim_omega) > 0.08 || abs(imu.gyroZ) > 0.08) {
-            measured_vx = 0.0; 
-        } else {
-            measured_vx = sim_vx; // On ne fait confiance à sim_vx que si le robot est aligné en ligne droite
-        }
+        // On fait confiance à la commande linéaire du PathFollower.
+        // Plus besoin de découper le signal avec le GyroZ : si le robot doit pivoter,
+        // le PathFollower met déjà de lui-même sim_vx à 0.0 !
+        measured_vx = sim_vx; 
 
-        // Prédiction EKF propre : Vitesse filtrée + GyroZ pur (L'accéléromètre est totalement éjecté !)
-        ekf.predict(measured_vx, imu.gyroZ, dt);
+        // 🔧 FILTRAGE PASSE-BAS DU GYROSCOPE (Low-Pass Filter)
+        // Réduit le bruit gyro (~±0.3 rad/s) sans retarder la réponse
+        // Constante de temps : 0.1 secondes
+        static float filtered_gyroZ = 0.0;
+        float tau = 0.1; // Constante de temps (secondes)
+        float alpha = dt / (dt + tau);
+        filtered_gyroZ += (imu.gyroZ - filtered_gyroZ) * alpha;
+        measured_omega = filtered_gyroZ;
+
+        // Prédiction EKF avec gyro lissé
+        ekf.predict(measured_vx, measured_omega, dt);
 
         // Affichage épuré à 10Hz pour le débogage de navigation
         static unsigned long last_debug_print = 0;
         if (millis() - last_debug_print > 100) {
             Serial.printf("🔍 [NAV] V_Cmd: %.2f | V_EKF: %.2f | GyroZ: %.3f rad/s | Cap: %.1f°\n", 
-                          sim_vx, measured_vx, imu.gyroZ, ekf.X(2) * 180.0 / M_PI);
+                          sim_vx, measured_vx, measured_omega, ekf.X(2) * 180.0 / M_PI);
             last_debug_print = millis();
         }
     }
@@ -454,21 +461,27 @@ void updateNavigationTask(float dt) {
 
     // Cinématique Inverse
     MotorCommands mc = kinematics.calculateDrive(cmd.linear_v, cmd.angular_w);
-    
-    // Configuration de la rampe des servos
-    const float MAX_SERVO_SPEED_RAD_S = 1.5; 
-    float max_angle_change = MAX_SERVO_SPEED_RAD_S * dt;
+
+    // 🚫 LIGNE SUPPRIMÉE POUR ÉVITER LE CONFLIT MATÉRIEL 
+    // actuators.setServoAngles(mc.angle_FL, mc.angle_FR, mc.angle_RL, mc.angle_RR);
+
+    // 🎯 CONFIGURATION DE LA RAMPE DES SERVOS (Slew Rate)
+    // AUGMENTÉ pour répondre plus vite aux corrections - permet d'éviter les oscillations
+    const float MAX_SERVO_SPEED_RAD_S = 4.0;  // ↑ de 1.5 → 4.0 rad/s 
+    float max_angle_change = MAX_SERVO_SPEED_RAD_S * dt; 
 
     static float filtered_FL = 0.0;
     static float filtered_FR = 0.0;
     static float filtered_RL = 0.0;
     static float filtered_RR = 0.0;
 
+    // Calcul de la rampe de lissage
     filtered_FL += constrain(mc.angle_FL - filtered_FL, -max_angle_change, max_angle_change);
     filtered_FR += constrain(mc.angle_FR - filtered_FR, -max_angle_change, max_angle_change);
     filtered_RL += constrain(mc.angle_RL - filtered_RL, -max_angle_change, max_angle_change);
     filtered_RR += constrain(mc.angle_RR - filtered_RR, -max_angle_change, max_angle_change);
 
+    // Envoi UNIQUE et propre des angles LISSÉS aux 4 Servomoteurs
     actuators.setServoAngles(filtered_FL, filtered_FR, filtered_RL, filtered_RR);
     
     actuators.setStepperSpeeds(
@@ -534,6 +547,7 @@ void loop() {
                 mission_active = false;
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
                 actuators.enableMotors(false); 
+                actuators.relaxServos();
             }
         }
     }
@@ -667,11 +681,14 @@ void loop() {
                     if (Serial.available() > 0 && Serial.read() == 's') {
                         Serial.println("\n🛑 Mission interrompue par l'utilisateur.");
                         mission_active = false;
+                        actuators.relaxServos();
+                        actuators.enableMotors(false);
                     }
                 }
 
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
                 actuators.enableMotors(false);
+                actuators.relaxServos();
                 Serial.println("Rover en sécurité.");
                 break;
             }

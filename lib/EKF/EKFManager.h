@@ -19,12 +19,13 @@ public:
         P.Fill(0); 
         P(0,0) = 1; P(1,1) = 1; P(2,2) = 1;
         
-        // Q : Bruit de prédiction (Glissement mécanique)
+        // Q : Bruit de prédiction (Glissement mécanique + Bruit GYRO)
         // Augmente ces valeurs si ton robot patine beaucoup sur le sol
+        // AUGMENTÉ pour tolérer le bruit du gyroscope (~0.3 rad/s mesuré)
         Q.Fill(0); 
         Q(0,0) = 0.01; // Incertitude générée sur X
         Q(1,1) = 0.01; // Incertitude générée sur Y
-        Q(2,2) = 0.05; // Incertitude générée sur la rotation
+        Q(2,2) = 0.3;  // Incertitude générée sur la rotation (↑ de 0.05 → 0.3 pour bruit gyro)
         
         // R : Bruit du capteur
         // Augmente cette valeur si ta boussole tremble ou est bruitée
