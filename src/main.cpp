@@ -83,7 +83,7 @@ bool decoderMissionManuelle(String payload) {
     String header = payload.substring(1, headerEnd); 
     
     int idx[6], i = 0;
-    int current_comma = header.indexOf(',');
+    int current_comma = header.indexOf(',', current_comma + 1);
     while (current_comma != -1 && i < 5) {
         idx[i++] = current_comma;
         current_comma = header.indexOf(',', current_comma + 1);
@@ -167,8 +167,8 @@ void modeTerminalSerie() {
 
         // --- 2. Écoute du Clavier (Port Série) ---
         if (Serial.available() > 0) {
-            String cmd = Serial.readStringUntil('\n'); // Lit toute la ligne
-            cmd.trim(); // Nettoie les espaces et les \r invisibles
+            String cmd = Serial.readStringUntil('\n'); 
+            cmd.trim(); 
 
             if (cmd.length() == 0) continue;
 
@@ -219,10 +219,9 @@ void calibrerServosInteractif(ActuatorManager& actuators) {
     Serial.println("S         : Sauvegarder et quitter");
     Serial.println("==========================================");
 
-    int current_servo = 1; // 1:FL, 2:FR, 3:RL, 4:RR
-    int offsets[4] = {0, 0, 0, 0}; // Offsets temporaires [FL, FR, RL, RR]
+    int current_servo = 1; 
+    int offsets[4] = {0, 0, 0, 0}; 
     
-    // On applique la position d'origine (0 radian)
     actuators.setServoAngles(0, 0, 0, 0);
     actuators.enableMotors(true);
 
@@ -239,7 +238,7 @@ void calibrerServosInteractif(ActuatorManager& actuators) {
                 case '4': current_servo = 4; Serial.println("👉 Servo sélectionné : Arrière-Droit (RR)"); break;
 
                 case '+':
-                case '=': // Pour certains claviers
+                case '=': 
                     offsets[current_servo - 1]++;
                     Serial.printf("🔧 Servo %d | Nouvel Offset : %d°\n", current_servo, offsets[current_servo - 1]);
                     break;
@@ -255,8 +254,6 @@ void calibrerServosInteractif(ActuatorManager& actuators) {
                     break;
             }
 
-            // Application en temps réel de la correction sur le robot
-            // On convertit les degrés d'offset temporaires en radians pour s'accorder avec setServoAngles
             float fl_rad = (offsets[0] * M_PI) / 180.0;
             float fr_rad = (offsets[1] * M_PI) / 180.0;
             float rl_rad = (offsets[2] * M_PI) / 180.0;
@@ -266,7 +263,6 @@ void calibrerServosInteractif(ActuatorManager& actuators) {
         }
     }
 
-    // Affichage du résultat final prêt à être copié
     Serial.println("\n==========================================");
     Serial.println("✅ CALIBRATION TERMINÉE !");
     Serial.println("Copiez ces lignes dans votre fichier config.h :");
@@ -295,7 +291,7 @@ void testerMoteursInteractif(ActuatorManager& actuators) {
     Serial.println("==========================================");
 
     bool testing = true;
-    long target = 200 * 16; // Fait exactement 1 tour complet (si tu es en 16 microsteps)
+    long target = 200 * 16; 
 
     while (testing) {
         if (Serial.available() > 0) {
@@ -322,23 +318,17 @@ void testerMoteursInteractif(ActuatorManager& actuators) {
                     break;
             }
 
-            // Si un moteur valide a été sélectionné
             if (motor_index != -1) {
                 Serial.printf("\n🚀 Lancement du moteur : %s...\n", motor_name.c_str());
-                
-                // On active la puissance
                 actuators.enableMotors(true);
                 delay(10);
 
-                // On lance la rotation à 1000 Hz
                 actuators.moveRelative(motor_index, target, 1000);
 
-                // On attend que le moteur finisse son tour
                 while(actuators.isMotorMoving(motor_index)) {
                     delay(50); 
                 }
 
-                // On coupe la puissance pour éviter la chauffe
                 actuators.enableMotors(false);
                 Serial.println("✅ Rotation terminée. (Testez un autre chiffre ou tapez S)");
             }
@@ -347,25 +337,20 @@ void testerMoteursInteractif(ActuatorManager& actuators) {
 }
 
 
-
-
 void setup() {
     Serial.begin(115200);
-    while(!Serial); // Sécurité pour l'ESP32-S3
+    while(!Serial); 
     delay(500); 
     
     Serial.println("\n🚀 Démarrage du Rover VEGA...");
 
-    // 1. Bus de communication
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SPI_CSN);
     
-    // 2. Pins IR & Moteurs
     pinMode(PIN_IR_OUT, INPUT);
     pinMode(PIN_ENABLE_MOTORS, OUTPUT);
-    digitalWrite(PIN_ENABLE_MOTORS, HIGH); // Moteurs désactivés par défaut
+    digitalWrite(PIN_ENABLE_MOTORS, HIGH); 
 
-    // 3. Initialisation IMU
     Serial.print("Initialisation IMU... ");
     if (imu.begin()) {
         imu_ok = true;
@@ -374,7 +359,6 @@ void setup() {
         Serial.println("⚠️ FAIL");
     }
 
-    // 4. Initialisation Actionneurs
     Serial.print("Initialisation Actionneurs... ");
     if (actuators.begin()) {
         actuators_ok = true;
@@ -383,7 +367,6 @@ void setup() {
         Serial.println("⚠️ FAIL");
     }
 
-    // 5. Initialisation Radio
     Serial.print("Initialisation Radio... ");
     if (nrf.begin()) {
         nrf_ok = true;
@@ -391,7 +374,7 @@ void setup() {
     } else {
         Serial.println("⚠️ FAIL (Désactivée)");
     }
-    // 6. Initialisation ToF
+
     Serial.print("Initialisation ToF... \n");
     if (tof.begin()) {
         tof_ok = true;
@@ -403,13 +386,12 @@ void setup() {
 }
 
 
-// --- LE CERVEAU DU ROVER (À appeler à fréquence fixe, ex: 50Hz) ---
-// --- Paramètre Magique pour tester sur le bureau ---
-
+// --- LE CERVEAU DU ROVER ---
 // Variables pour le simulateur
 float sim_vx = 0.0;
 float sim_omega = 0.0;
 float sim_heading = 0.0;
+
 void updateNavigationTask(float dt) {
     float measured_vx = 0.0;
     float measured_omega = 0.0;
@@ -418,107 +400,77 @@ void updateNavigationTask(float dt) {
     // 1. ACQUISITION & ODOMÉTRIE (Où suis-je ?)
     // ==========================================
     if (SIMULATION_MODE) {
-        // --- MODE SIMULATION PURE ---
-        // On suppose que le robot virtuel a exécuté la vitesse ordonnée
         measured_vx = sim_vx; 
         measured_omega = sim_omega;
 
-        // On simule la rotation de la boussole virtuelle
         sim_heading += measured_omega * dt; 
         while (sim_heading > M_PI) sim_heading -= 2.0 * M_PI;
         while (sim_heading < -M_PI) sim_heading += 2.0 * M_PI;
 
-        // Prédiction EKF purement virtuelle
         ekf.predict(measured_vx, measured_omega, dt);
-        // ekf.update(sim_heading); // On peut activer l'update virtuel si besoin
-
- } else {
-        // --- MODE RÉEL ---
+    } else {
+        // --- MODE RÉEL (SANS ACCÉLÉROMÈTRE) ---
         imu.readMotion();
         imu.updateEulerAngles();
         tof.update(); 
 
-        // 🎯 EXPÉRIMENTATION ACCÉLÉROMÈTRE (Vitesse fantôme)
-        static float v_accel = 0.0;     // Vitesse intégrée via accéléromètre
-        static float accX_bias = 0.05;  // ⚠️ À AJUSTER : Ton biais statique au repos
-        
-        // 1. On retire le biais statique de la mesure actuelle
-        float pure_accel = imu.accX - accX_bias; 
-
-        // 2. Deadband : Si l'accélération est minuscule (bruit/vibrations), on la considère à zéro
-        if (abs(pure_accel) < 0.15) { // Seuil de 0.15 m/s² à ajuster
-            pure_accel = 0.0;
-        }
-
-        // 3. Intégration d'Euler pour obtenir la vitesse : v = v + a * dt
-        // On limite le calcul uniquement si le cerveau demande d'avancer
-        if (sim_vx > 0.0) {
-            v_accel += pure_accel * dt;
+        // 🎯 LOGIQUE ANTI-DRIFT PIVOT : 
+        // Si la vitesse de rotation commandée (sim_omega) ou physique (imu.gyroZ) est significative,
+        // c'est que le robot pivote sur lui-même. Sa vitesse d'avance réelle est donc strictement nulle.
+        if (abs(sim_omega) > 0.08 || abs(imu.gyroZ) > 0.08) {
+            measured_vx = 0.0; 
         } else {
-            v_accel = 0.0; // Si le robot pivote sur place, on force la vitesse linéaire à 0
+            measured_vx = sim_vx; // On ne fait confiance à sim_vx que si le robot est aligné en ligne droite
         }
 
-        // Pour des raisons de sécurité mécanique, on empêche la vitesse fantôme de devenir négative
-        if (v_accel < 0.0) v_accel = 0.0; 
-
-        // On garde ton odométrie de consigne actuelle pour l'EKF le temps du test
-        measured_vx = sim_vx; 
+        // Prédiction EKF propre : Vitesse filtrée + GyroZ pur (L'accéléromètre est totalement éjecté !)
         ekf.predict(measured_vx, imu.gyroZ, dt);
 
-        // 📊 AFFICHAGE COMPARATIF DANS LE RADAR
-        // Tu vas pouvoir comparer "V_Commande" (0.05) et "V_Accel" (calculée par le capteur)
-        Serial.printf("🔍 [TEST ACCEL] AccX_Brut: %.3f m/s² | Acc_Filtre: %.3f m/s² | V_Accel: %.3f m/s² | V_Commande: %.2f\n", 
-                      imu.accX, pure_accel, v_accel, sim_vx);
+        // Affichage épuré à 10Hz pour le débogage de navigation
+        static unsigned long last_debug_print = 0;
+        if (millis() - last_debug_print > 100) {
+            Serial.printf("🔍 [NAV] V_Cmd: %.2f | V_EKF: %.2f | GyroZ: %.3f rad/s | Cap: %.1f°\n", 
+                          sim_vx, measured_vx, imu.gyroZ, ekf.X(2) * 180.0 / M_PI);
+            last_debug_print = millis();
+        }
     }
 
     // ==========================================
     // 2. DÉCISION (Où dois-je aller ?)
     // ==========================================
-    // Le Cerveau calcule la nouvelle trajectoire à partir de la position EKF estimée
     VelocityCommand cmd = follower.update(ekf.X(0), ekf.X(1), ekf.X(2));
 
-    // On mémorise cette commande pour qu'elle devienne le "measured_vx" du PROCHAIN cycle
+    // On mémorise cette commande pour qu'elle devienne le "sim_vx" du PROCHAIN cycle
     sim_vx = cmd.linear_v;
     sim_omega = cmd.angular_w;
 
     // ==========================================
     // 3. SÉCURITÉ & ACTIONNEURS (Comment j'y vais ?)
     // ==========================================
-    // Arrêt d'urgence ToF (Uniquement en réel pour ne pas coincer la simulation)
-    // ==========================================
-    // 3. SÉCURITÉ ET ACTIONNEURS (Comment j'y vais ?)
-    // ==========================================
-    // Arrêt d'urgence ToF (Uniquement en réel pour ne pas coincer la simulation)
     if (!SIMULATION_MODE && tof.emergencyStopRequired()) {
         cmd.linear_v = 0.0;
         cmd.angular_w = 0.0;
     }
 
-    // Cinématique Inverse : Calcul des angles cibles théoriques (mc.angle_...)
+    // Cinématique Inverse
     MotorCommands mc = kinematics.calculateDrive(cmd.linear_v, cmd.angular_w);
     
-    // 🎯 CONFIGURATION DE LA RAMPE DES SERVOS
-    // Vitesse maximale de rotation autorisée pour tes servos (en radians par seconde)
-    // 1.5 rad/s correspond environ à 90° par seconde. Plus ce chiffre est bas, plus le mouvement sera lent et fluide.
+    // Configuration de la rampe des servos
     const float MAX_SERVO_SPEED_RAD_S = 1.5; 
-    float max_angle_change = MAX_SERVO_SPEED_RAD_S * dt; // Le déplacement max autorisé pour ce cycle
+    float max_angle_change = MAX_SERVO_SPEED_RAD_S * dt;
 
-    // Variables statiques pour mémoriser la position filtrée précédente
     static float filtered_FL = 0.0;
     static float filtered_FR = 0.0;
     static float filtered_RL = 0.0;
     static float filtered_RR = 0.0;
 
-    // Application de la rampe : on limite l'écart entre la cible (mc.angle) et la position actuelle (filtered)
     filtered_FL += constrain(mc.angle_FL - filtered_FL, -max_angle_change, max_angle_change);
     filtered_FR += constrain(mc.angle_FR - filtered_FR, -max_angle_change, max_angle_change);
     filtered_RL += constrain(mc.angle_RL - filtered_RL, -max_angle_change, max_angle_change);
     filtered_RR += constrain(mc.angle_RR - filtered_RR, -max_angle_change, max_angle_change);
 
-    // Envoi des angles LISSÉS aux 4 Servomoteurs
     actuators.setServoAngles(filtered_FL, filtered_FR, filtered_RL, filtered_RR);
     
-    // Envoi des vitesses aux 6 Moteurs Pas-à-Pas (Traction)
     actuators.setStepperSpeeds(
         kinematics.speedToStepsHz(mc.speed_FL), kinematics.speedToStepsHz(mc.speed_FR),
         kinematics.speedToStepsHz(mc.speed_ML), kinematics.speedToStepsHz(mc.speed_MR),
@@ -527,20 +479,16 @@ void updateNavigationTask(float dt) {
 }
 
 void loop() {
-    // 1. Lecture radio
     nrf.update();
 
-    // 2. Traitement des commandes radio (Le Lexique)
     if (nrf.hasCommand()) {
         String cmd = nrf.readCommand();
 
         if (cmd == "MISSION_LOADED") {
-            // Le NRF a tout décodé. On initialise l'EKF avec notre position de départ !
-            ekf.reset(START_X, START_Y, START_THETA); // ⚠️ Assure-toi d'avoir une fonction reset dans ton EKF
+            ekf.reset(START_X, START_Y, START_THETA); 
             follower.resetMission();
             Serial.println("🎯 Robot localisé et PathFollower prêt. En attente de 'START'...");
         } 
-        
         else if (cmd == "START") {
             if (mission_ready_to_start) {
                 Serial.println("🚀 DÉCOLLAGE : Mission activée !");
@@ -550,62 +498,46 @@ void loop() {
                 Serial.println("❌ Impossible de démarrer : Aucune mission en mémoire !");
             }
         } 
-        
         else if (cmd == "STOP") {
             Serial.println("🛑 ARRÊT D'URGENCE !");
             mission_active = false;
             actuators.setStepperSpeeds(0,0,0,0,0,0);
             actuators.enableMotors(false);
         } 
-        
         else if (cmd == "CALIB") {
             imu.calibrateMagnetometer();
         }
-        
         else {
             Serial.printf("❓ Commande inconnue : %s\n", cmd.c_str());
         }
     }
 
-    // 3. Exécution de la tâche de navigation (Si active)
     if (mission_active) {
         static unsigned long last_time = millis();
-        static unsigned long last_telemetry_time = millis(); // ⏱️ Nouveau timer pour l'affichage
+        static unsigned long last_telemetry_time = millis(); 
         
         unsigned long now = millis();
         float dt = (now - last_time) / 1000.0;
         
-        if (dt >= 0.02) { // Boucle de contrôle à 50Hz
+        if (dt >= 0.02) { 
             last_time = now;
             updateNavigationTask(dt); 
             
-            // --- 📡 ENVOI DE LA TÉLÉMÉTRIE (Toutes les 500 ms) ---
             if (now - last_telemetry_time >= 500) {
                 last_telemetry_time = now;
-                
-                // Affichage de la position estimée par le Filtre de Kalman
-                Serial.printf("📍 NAV | X: %.2f m | Y: %.2f m | Cap: %5.1f° ", 
+                Serial.printf("📍 NAV | X: %.2f m | Y: %.2f m | Cap: %5.1f° \n", 
                               ekf.X(0), ekf.X(1), ekf.X(2) * 180.0 / M_PI);
-                
-                // Si ton PathFollower a une variable publique pour l'index du point (ex: current_wp),
-                // tu peux l'afficher ici. (Adapte le nom de la variable si besoin)
-                // Serial.printf("| Cible WP: %d/%d ", follower.current_wp, PATH_SIZE);
-                
-                Serial.println(); // Retour à la ligne
             }
 
-            // On vérifie si on est arrivé à la fin de la mission
             if (follower.isDone()) {
                 Serial.println("\n✅ MISSION TERMINÉE AVEC SUCCÈS ! Objectif atteint.");
                 mission_active = false;
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
-                actuators.enableMotors(false); // Optionnel : couper le courant pour refroidir
+                actuators.enableMotors(false); 
             }
         }
     }
 
-
-    // --- PARTIE MENU SÉRIE ---
     if (Serial.available() > 0) {
         char choix = Serial.read();
         if (choix == '\n' || choix == '\r') return; 
@@ -613,38 +545,28 @@ void loop() {
         Serial.printf("\n--- Test %c ---\n", choix);
 
         switch (choix) {
-            
             case '0': {
-        if (!tof_ok) { 
-            Serial.println("⚠️ Les capteurs ToF ne sont pas initialisés."); 
-            break; 
-        }
-        Serial.println("\n--- DASHBOARD TEMPS RÉEL : MATRICE ToF AVANT ---");
-        Serial.println("Passez votre main devant les 4 coins du bloc avant...");
-        Serial.println("Tapez 's' et Entrée pour arrêter le test.");
-        delay(1500); // Petit temps pour lire l'instruction avant le flux de données
-        
-        // 100 cycles * 200ms = 20 secondes de test dynamique
-        for (int i = 0; i < 100; i++) {
-            // Arrêt manuel si on tape 's'
-            if (Serial.available() > 0 && Serial.read() == 's') {
-                Serial.println("\n🛑 Arrêt manuel de la lecture.");
+                if (!tof_ok) { 
+                    Serial.println("⚠️ Les capteurs ToF ne sont pas initialisés."); 
+                    break; 
+                }
+                Serial.println("\n--- DASHBOARD TEMPS RÉEL : MATRICE ToF AVANT ---");
+                Serial.println("Passez votre main devant les 4 coins du bloc avant...");
+                Serial.println("Tapez 's' et Entrée pour arrêter le test.");
+                delay(1500); 
+                
+                for (int i = 0; i < 100; i++) {
+                    if (Serial.available() > 0 && Serial.read() == 's') {
+                        Serial.println("\n🛑 Arrêt manuel de la lecture.");
+                        break;
+                    }
+                    tof.update(); 
+                    tof.printGridStatus(); 
+                    delay(200); 
+                }
+                Serial.println("\n✅ Retour au menu principal.");
                 break;
             }
-
-            // 1. Mise à jour des lectures lasers
-            tof.update(); 
-            
-            // 2. 🎯 Affichage en grille 2x2 ultra-visuel
-            tof.printGridStatus(); 
-            
-            // 3. Cadence de rafraîchissement (5 Hz)
-            delay(200); 
-        }
-        
-        Serial.println("\n✅ Retour au menu principal.");
-        break;
-    }
             
             case '1': {
                 Serial.println("Scan I2C...");
@@ -660,9 +582,7 @@ void loop() {
                 break;
             }
             case '2': 
-                //Serial.println("LED Verte (1s)");
-                //neopixelWrite(38, 0, 255, 0); delay(1000); neopixelWrite(38, 0, 0, 0); 
-                //break;
+                break;
             case '3':
                 Serial.println("Lecture IR (2s)");
                 for(int i=0; i<10; i++) { Serial.printf("IR: %d\n", digitalRead(PIN_IR_OUT)); delay(200); }
@@ -675,31 +595,6 @@ void loop() {
             case '5': {
                 Serial.println("\n--- TEST DES 6 MOTEURS (1 Tour complet) ---");
                 testerMoteursInteractif(actuators);
-                /*
-                // 1. Activation globale
-                actuators.enableMotors(true);
-                delay(10);
-
-                long target = 200 * 16; 
-                
-                // 2. Lancement du mouvement pour les 6 moteurs (index 0 à 5)
-                for(int i = 0; i < 6; i++) {
-                    actuators.moveRelative(i, target, 1000); 
-                }
-
-                Serial.println("Rotation en cours des 6 roues...");
-                
-                // 3. Attente non-bloquante (on surveille le moteur 0, vu qu'ils finiront tous en même temps)
-                while(actuators.isMotorMoving(0)) {
-                    Serial.printf("Pas parcourus (Moteur 1) : %ld / %ld\r", actuators.getStepCount(0), target);
-                    delay(50); 
-                }
-                
-                Serial.println("\n✅ Tour terminé pour tous les moteurs.");
-                
-                // 4. Désactivation
-                actuators.enableMotors(false);
-                */
                 break;
             }
 
@@ -709,34 +604,22 @@ void loop() {
                     break;
                 }
                 Serial.println("\n--- LECTURE COMPLÈTE IMU (Brutes + Angles) ---");
-                
                 for(int i = 0; i < 50; i++) {
-                    // 1. Lecture Accéléromètre et Gyroscope
                     imu.readMotion(); 
-                    
-                    // 2. Lecture Boussole ET calcul de Pitch, Roll et Cap
-                    // (Ne JAMAIS appeler getRawHeading() manuellement ici !)
                     imu.updateEulerAngles();
-                    
-                    // 3. Affichage global sur une seule ligne
                     Serial.printf("Acc[X:%5.1f Y:%5.1f Z:%5.1f] | Gyr[X:%5.1f Y:%5.1f Z:%5.1f] | Mag[X:%6d Y:%6d Z:%6d] | CAP:%5.1f°\n",
                         imu.accX, imu.accY, imu.accZ,
                         imu.gyroX, imu.gyroY, imu.gyroZ,
                         imu.mag_x, imu.mag_y, imu.mag_z,
                         imu.heading * 180.0/M_PI);
-                    delay(100); // 10 lectures par seconde
+                    delay(100); 
                 }
                 break;
             }
             case '7':
                 if (!actuators_ok) { Serial.println("Actionneurs HS."); break; }
-                //Serial.println("Balayage Servos (-45° -> +45° -> 0°)");
-                //actuators.setServoAngles(-0.78, -0.78, -0.78, -0.78); delay(1500);
-                //actuators.setServoAngles(0.78, 0.78, 0.78, 0.78); delay(1500);
                 actuators.setServoAngles(0, 0, 0, 0);
-
                 calibrerServosInteractif(actuators);
-
                 break;
             case '8': 
                 if (actuators_ok) actuators.printStatus(); 
@@ -751,7 +634,6 @@ void loop() {
                 Serial.println("\n🚀 LANCEMENT DE LA MISSION AUTONOME");
                 Serial.println("Appuyez sur 's' pour stopper à tout moment.");
                 
-                // Initialisation des états
                 actuators.enableMotors(true);
                 actuators.resetOdometry();
                 follower.resetMission();
@@ -761,39 +643,33 @@ void loop() {
                 mission_active = true;
 
                 while (mission_active) {
-                    // 1. Gestion du temps (dt)
                     unsigned long now = millis();
                     float dt = (now - last_time) / 1000.0;
-                    if (dt < 0.02) continue; // On tourne à 50Hz max
+                    if (dt < 0.02) continue; 
                     last_time = now;
 
-                    // 2. Exécution du cerveau
                     updateNavigationTask(dt);
 
-                    // 3. Affichage du tableau de bord (toutes les 500ms)
                     static unsigned long last_print = 0;
                     if (now - last_print > 500) {
-                        Serial.printf("POS [X:%.2f Y:%.2f T:%.1f°] | WP: %d/%d | ToF: %d mm\n",
-                            ekf.X(0), ekf.X(1), ekf.X(2) * 180.0/PI,
+                        Serial.printf("POS [X:%.2f Y:%.2f T:%.1f°] | WP: %d/%d | ToF TL: %d mm\n",
+                            ekf.X(0), ekf.X(1), ekf.X(2) * 180.0/M_PI,
                             follower.getCurrentIndex() + 1, PATH_SIZE,
                             tof.getTopLeftDistance());
                         last_print = now;
                     }
 
-                    // 4. Vérification de fin de mission
                     if (follower.isDone()) {
                         Serial.println("\n✅ Mission terminée ! Arrivée au dernier point.");
                         mission_active = false;
                     }
 
-                    // 5. Interruption manuelle
                     if (Serial.available() > 0 && Serial.read() == 's') {
                         Serial.println("\n🛑 Mission interrompue par l'utilisateur.");
                         mission_active = false;
                     }
                 }
 
-                // Arrêt complet des moteurs en fin de test
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
                 actuators.enableMotors(false);
                 Serial.println("Rover en sécurité.");
@@ -822,8 +698,6 @@ void loop() {
             case 'k':
             case 'K': {
                 Serial.println("\n--- TEST DE LA CINÉMATIQUE PURE ---");
-                
-                // 1. On ordonne au robot d'aller tout droit
                 Serial.println("1. Ligne droite (v = 0.2 m/s, w = 0)");
                 MotorCommands mc1 = kinematics.calculateDrive(0.2, 0.0);
                 actuators.setServoAngles(mc1.angle_FL, mc1.angle_FR, mc1.angle_RL, mc1.angle_RR);
@@ -831,7 +705,6 @@ void loop() {
                               mc1.angle_FL, mc1.angle_FR, mc1.angle_RL, mc1.angle_RR);
                 delay(4000);
 
-                // 2. On ordonne au robot de tourner sur place vers la GAUCHE
                 Serial.println("2. Rotation sur place GAUCHE (v = 0, w = 0.5 rad/s)");
                 MotorCommands mc2 = kinematics.calculateDrive(0.0, 0.5);
                 actuators.setServoAngles(mc2.angle_FL, mc2.angle_FR, mc2.angle_RL, mc2.angle_RR);
@@ -839,26 +712,16 @@ void loop() {
                               mc2.angle_FL, mc2.angle_FR, mc2.angle_RL, mc2.angle_RR);
                 delay(4000);
 
-                // 3. Retour à zéro
                 Serial.println("3. Retour à zéro");
                 actuators.setServoAngles(0, 0, 0, 0);
                 break;
             }
-                
             default:
                 Serial.println("⚠️ Choix non reconnu.");
                 break;
         }
 
-        // On réaffiche le menu une fois l'action finie (avec un petit délai propre)
         delay(500);
         afficherMenu();
     }
 }
-
-
-
-
-
-
-

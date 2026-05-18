@@ -76,12 +76,12 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
     float tolerance_angle = 0.052; 
 
     if (abs(angle_error) > 0.35) { 
-        // Pivot sur place 
-        cmd.linear_v = 0.0; 
-        
-        // 🎯 ON INVERSE LE VOLANT ICI (Ajout du signe -)
-        cmd.angular_w = constrain(-Kp_ANGULAR * angle_error, -0.8, 0.8);
-    } 
+    // Pivot sur place (Erreur > 20°)
+    cmd.linear_v = 0.0; 
+    
+    // 🛑 ON BRIDE ICI : On passe de 0.8 à 0.25 pour que le robot tourne très lentement et s'arrête pile sur l'axe
+    cmd.angular_w = constrain(-Kp_ANGULAR * angle_error, -0.25, 0.25);
+}
     else {
         // Zone de validation
         if (abs(angle_error) <= tolerance_angle) {
