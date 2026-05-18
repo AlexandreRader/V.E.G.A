@@ -438,15 +438,36 @@ void updateNavigationTask(float dt) {
         imu.updateEulerAngles();
         tof.update(); 
 
-        // Odométrie : On utilise la vitesse linéaire ordonnée au cycle précédent
-        measured_vx = sim_vx; 
-        
-        // Prédiction avec la commande moteur et le Gyroscope réel
+        // 🎯 ODOMÉTRIE HYBRIDE INTÉLLIGENTE
+        if (sim_vx == 0.0) {
+            // 🔄 1. On est en train de pivoter sur place
+            // On force la vitesse à 0 pour bloquer X et Y dans l'EKF
+            measured_vx = 0.0; 
+            
+            // On rafraîchit les anciennes variables pour éviter un "saut de pas" au redémarrage
+            last_steps_ML = actuators.getStepCount(2);
+            last_steps_MR = actuators.getStepCount(3);
+        } 
+        else {
+            // 🚀 2. On est censé avancer en ligne droite
+            // On va lire la VRAIE quantité de pas générée par la bibliothèque moteur
+            long current_steps_ML = actuators.getStepCount(2); 
+            long current_steps_MR = actuators.getStepCount(3); 
+            
+            // Calcul des vitesses réelles de chaque côté
+            float v_ML = ((current_steps_ML - last_steps_ML) * METERS_PER_STEP) / dt;
+            float v_MR = ((current_steps_MR - last_steps_MR) * METERS_PER_STEP) / dt;
+            
+            // Sauvegarde pour le prochain cycle
+            last_steps_ML = current_steps_ML;
+            last_steps_MR = current_steps_MR;
+
+            // La vitesse réelle est la moyenne des deux côtés
+            measured_vx = (v_ML + v_MR) / 2.0; 
+        }
+
+        // Évolution de l'EKF indexé sur la vraie vitesse physique
         ekf.predict(measured_vx, imu.gyroZ, dt);
-        
-        // Correction par la Boussole 
-        // 🛑 DÉSACTIVÉE TEMPORAIREMENT pour le test "Gyro-Pur" (Isolement magnétique)
-        // ekf.update(imu.heading);
     }
 
     // ==========================================
@@ -463,16 +484,38 @@ void updateNavigationTask(float dt) {
     // 3. SÉCURITÉ & ACTIONNEURS (Comment j'y vais ?)
     // ==========================================
     // Arrêt d'urgence ToF (Uniquement en réel pour ne pas coincer la simulation)
+    // ==========================================
+    // 3. SÉCURITÉ ET ACTIONNEURS (Comment j'y vais ?)
+    // ==========================================
+    // Arrêt d'urgence ToF (Uniquement en réel pour ne pas coincer la simulation)
     if (!SIMULATION_MODE && tof.emergencyStopRequired()) {
         cmd.linear_v = 0.0;
         cmd.angular_w = 0.0;
     }
 
-    // Cinématique Inverse : Conversion de la vitesse globale du rover vers les 6 roues
+    // Cinématique Inverse : Calcul des angles cibles théoriques (mc.angle_...)
     MotorCommands mc = kinematics.calculateDrive(cmd.linear_v, cmd.angular_w);
     
-    // Envoi des angles aux 4 Servomoteurs (Direction)
-    actuators.setServoAngles(mc.angle_FL, mc.angle_FR, mc.angle_RL, mc.angle_RR);
+    // 🎯 CONFIGURATION DE LA RAMPE DES SERVOS
+    // Vitesse maximale de rotation autorisée pour tes servos (en radians par seconde)
+    // 1.5 rad/s correspond environ à 90° par seconde. Plus ce chiffre est bas, plus le mouvement sera lent et fluide.
+    const float MAX_SERVO_SPEED_RAD_S = 1.5; 
+    float max_angle_change = MAX_SERVO_SPEED_RAD_S * dt; // Le déplacement max autorisé pour ce cycle
+
+    // Variables statiques pour mémoriser la position filtrée précédente
+    static float filtered_FL = 0.0;
+    static float filtered_FR = 0.0;
+    static float filtered_RL = 0.0;
+    static float filtered_RR = 0.0;
+
+    // Application de la rampe : on limite l'écart entre la cible (mc.angle) et la position actuelle (filtered)
+    filtered_FL += constrain(mc.angle_FL - filtered_FL, -max_angle_change, max_angle_change);
+    filtered_FR += constrain(mc.angle_FR - filtered_FR, -max_angle_change, max_angle_change);
+    filtered_RL += constrain(mc.angle_RL - filtered_RL, -max_angle_change, max_angle_change);
+    filtered_RR += constrain(mc.angle_RR - filtered_RR, -max_angle_change, max_angle_change);
+
+    // Envoi des angles LISSÉS aux 4 Servomoteurs
+    actuators.setServoAngles(filtered_FL, filtered_FR, filtered_RL, filtered_RR);
     
     // Envoi des vitesses aux 6 Moteurs Pas-à-Pas (Traction)
     actuators.setStepperSpeeds(

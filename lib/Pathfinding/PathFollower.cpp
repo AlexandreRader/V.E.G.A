@@ -48,21 +48,21 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
         dy = target.y - current_y;
     }
 
-    // 4. Calculer l'erreur de cap (Heading Error)
-    // On utilise dy, dx (au lieu de dx, dy) et on ajuste selon le sens des axes
-    
-    // NOUVEAU CALCUL DE L'ANGLE CIBLE (Pour s'aligner avec une boussole classique)
+// 4. Calculer l'erreur de cap (Heading Error)
+    // On utilise dy, dx dans l'ordre standard (Y en premier)
     float target_angle = atan2(dy, dx); 
-    
-    // Si ta boussole a le Nord à 0°, l'Est à 90°, le Sud à 180° :
-    // L'axe X de la carte est l'Est, et l'axe Y est le Nord.
-    // L'équation mathématique standard pour la navigation devient souvent celle-ci :
-    target_angle = M_PI / 2.0 - target_angle; 
-    
-    // 🎯 CORRECTIF 1 : NORMALISATION ANTI ZIG-ZAG
+
+    // ❌ ON SUPPRIME CETTE LIGNE QUI FAUSSAIT LA CIBLE DE 180° :
+    // target_angle = M_PI / 2.0 - target_angle; 
+
+    // Calcul de l'erreur d'angle brute
     float angle_error = target_angle - current_theta;
+
+    // 🎯 NORMALISATION ANTI ZIG-ZAG
     while (angle_error > M_PI) angle_error -= 2.0 * M_PI;
     while (angle_error < -M_PI) angle_error += 2.0 * M_PI;
+
+    // ... (Le reste du code reste identique avec la Deadband et le Debug) ...
     
     // === ASTUCE DE DÉBOGAGE ABSOLUE ===
     // Imprime ces valeurs pour voir si l'erreur d'angle tombe bien autour de zéro !
@@ -72,29 +72,40 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
 
     // 5. Générer les commandes de vitesse
     
-    // Ton idée : Tolérance de validation à +/- 1 degré (~0.017 rad)
-    float tolerance_angle = 0.017; 
+    // Tolérance élargie à 3 degrés (~0.052 rad)
+    float tolerance_angle = 0.052; 
 
-    // Si on est à plus de 20° d'erreur (0.35 rad) : Stop & Turn pur
     if (abs(angle_error) > 0.35) { 
+        // Pivot sur place 
         cmd.linear_v = 0.0; 
-        cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.8, 0.8);
+        
+        // 🎯 ON INVERSE LE VOLANT ICI (Ajout du signe -)
+        cmd.angular_w = constrain(-Kp_ANGULAR * angle_error, -0.8, 0.8);
     } 
-    // Sinon, on est dans le bon cône de direction...
     else {
-        // 🎯 TA LOGIQUE DE VALIDATION :
+        // Zone de validation
         if (abs(angle_error) <= tolerance_angle) {
-            // Le cap est PARFAIT (+/- 1°). On valide !
-            cmd.linear_v = TARGET_SPEED_MS; // On roule à 0.05 m/s
-            cmd.angular_w = 0.0; // 🔒 On fige les roues droites devant !
+            cmd.linear_v = TARGET_SPEED_MS; 
+            cmd.angular_w = 0.0;            
         } 
         else {
-            // On est entre 1° et 20° : On avance tout en corrigeant la trajectoire en douceur
+            // Roulage et correction douce
             float speed_factor = cos(angle_error);
             cmd.linear_v = TARGET_SPEED_MS * speed_factor;
-            cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.3, 0.3);
+            
+            // 🎯 ON INVERSE LE VOLANT ICI AUSSI (Ajout du signe -)
+            cmd.angular_w = constrain(-Kp_ANGULAR * angle_error, -0.3, 0.3);
         }
     }
 
+    // ==========================================
+    // 🛑 RADAR DE DÉBOGAGE ABSOLU (À LAISSER POUR LE TEST)
+    // ==========================================
+    //Serial.printf("🎯 Cible: %.1f° | Err: %.1f° | Vitesse (v): %.2f | Angle (w): %.2f\n", 
+     //             target_angle * (180.0 / M_PI), 
+     //             angle_error * (180.0 / M_PI), 
+      //            cmd.linear_v, 
+      //           cmd.angular_w);
+                  
     return cmd;
 }

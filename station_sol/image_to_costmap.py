@@ -14,7 +14,7 @@ import heapq # Ajout pour l'algorithme A*
 
 # --- CONFIGURATION PHYSIQUE DE LA PISTE ---
 MAP_WIDTH_M = 4.0   
-MAP_HEIGHT_M = 6.0  
+MAP_HEIGHT_M = 4.0  
 CELL_SIZE_CM = 10.0 
 
 # --- CONFIGURATION CALIBRATION ---
