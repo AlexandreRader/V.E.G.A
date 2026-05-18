@@ -10,8 +10,11 @@ private:
     AK09918 ak09918;
     ICM20600 icm20600;
     
-    // Offset calculé au démarrage pour le gyroscope
+    
+    // Offsets calculés au démarrage
     float gyro_offset_z;
+    float accel_offset_x;  // 🎯 Nouvel offset
+    float accel_offset_y;  // 🎯 Nouvel offset
 
 public:
     // Variables brutes
@@ -42,24 +45,33 @@ public:
             delay(10);
         }
 
-        // --- CALIBRATION STATIQUE DU GYROSCOPE ---
-        Serial.print("Calibration du Gyroscope (Ne touchez pas le robot)... ");
-        long sumZ = 0;
-        for (int i = 0; i < 200; i++) {
-            sumZ += icm20600.getGyroscopeZ();
+        // --- CALIBRATION STATIQUE ÉTENDUE (GYRO + ACCEL 2D) ---
+        Serial.print("Calibration IMU (Ne touchez pas le robot pendant 5s)... ");
+        long sumGyroZ = 0;
+        long sumAccX = 0;
+        long sumAccY = 0;
+        int nb_samples = 500; // 500 points = 5 secondes de stabilité
+
+        for (int i = 0; i < nb_samples; i++) {
+            sumGyroZ += icm20600.getGyroscopeZ();
+            sumAccX  += icm20600.getAccelerationX();
+            sumAccY  += icm20600.getAccelerationY();
             delay(10);
         }
-        gyro_offset_z = sumZ / 200.0;
+        
+        gyro_offset_z  = (float)sumGyroZ / nb_samples;
+        accel_offset_x = (float)sumAccX / nb_samples;
+        accel_offset_y = (float)sumAccY / nb_samples;
+        
         Serial.println("✅ OK");
-
         return true;
     }
 
     void readMotion() {
-        // Lecture Accéléromètre (La librairie renvoie des milli-g !)
-        acc_x = icm20600.getAccelerationX();
-        acc_y = icm20600.getAccelerationY();
-        acc_z = icm20600.getAccelerationZ();
+        // Lecture Accéléromètre brute ET correction du biais usine
+        acc_x = icm20600.getAccelerationX() - accel_offset_x; // 🎯 Corrigé !
+        acc_y = icm20600.getAccelerationY() - accel_offset_y; // 🎯 Corrigé !
+        acc_z = icm20600.getAccelerationZ(); // ⚠️ On ne touche pas à Z (Gravité) !
 
         // Conversion mg -> m/s² (1000 mg = 1 g = 9.81 m/s²)
         accX = (float)acc_x * (9.81 / 1000.0);

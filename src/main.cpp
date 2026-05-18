@@ -432,42 +432,43 @@ void updateNavigationTask(float dt) {
         ekf.predict(measured_vx, measured_omega, dt);
         // ekf.update(sim_heading); // On peut activer l'update virtuel si besoin
 
-    } else {
+ } else {
         // --- MODE RÉEL ---
         imu.readMotion();
         imu.updateEulerAngles();
         tof.update(); 
 
-        // 🎯 ODOMÉTRIE HYBRIDE INTÉLLIGENTE
-        if (sim_vx == 0.0) {
-            // 🔄 1. On est en train de pivoter sur place
-            // On force la vitesse à 0 pour bloquer X et Y dans l'EKF
-            measured_vx = 0.0; 
-            
-            // On rafraîchit les anciennes variables pour éviter un "saut de pas" au redémarrage
-            last_steps_ML = actuators.getStepCount(2);
-            last_steps_MR = actuators.getStepCount(3);
-        } 
-        else {
-            // 🚀 2. On est censé avancer en ligne droite
-            // On va lire la VRAIE quantité de pas générée par la bibliothèque moteur
-            long current_steps_ML = actuators.getStepCount(2); 
-            long current_steps_MR = actuators.getStepCount(3); 
-            
-            // Calcul des vitesses réelles de chaque côté
-            float v_ML = ((current_steps_ML - last_steps_ML) * METERS_PER_STEP) / dt;
-            float v_MR = ((current_steps_MR - last_steps_MR) * METERS_PER_STEP) / dt;
-            
-            // Sauvegarde pour le prochain cycle
-            last_steps_ML = current_steps_ML;
-            last_steps_MR = current_steps_MR;
+        // 🎯 EXPÉRIMENTATION ACCÉLÉROMÈTRE (Vitesse fantôme)
+        static float v_accel = 0.0;     // Vitesse intégrée via accéléromètre
+        static float accX_bias = 0.05;  // ⚠️ À AJUSTER : Ton biais statique au repos
+        
+        // 1. On retire le biais statique de la mesure actuelle
+        float pure_accel = imu.accX - accX_bias; 
 
-            // La vitesse réelle est la moyenne des deux côtés
-            measured_vx = (v_ML + v_MR) / 2.0; 
+        // 2. Deadband : Si l'accélération est minuscule (bruit/vibrations), on la considère à zéro
+        if (abs(pure_accel) < 0.15) { // Seuil de 0.15 m/s² à ajuster
+            pure_accel = 0.0;
         }
 
-        // Évolution de l'EKF indexé sur la vraie vitesse physique
+        // 3. Intégration d'Euler pour obtenir la vitesse : v = v + a * dt
+        // On limite le calcul uniquement si le cerveau demande d'avancer
+        if (sim_vx > 0.0) {
+            v_accel += pure_accel * dt;
+        } else {
+            v_accel = 0.0; // Si le robot pivote sur place, on force la vitesse linéaire à 0
+        }
+
+        // Pour des raisons de sécurité mécanique, on empêche la vitesse fantôme de devenir négative
+        if (v_accel < 0.0) v_accel = 0.0; 
+
+        // On garde ton odométrie de consigne actuelle pour l'EKF le temps du test
+        measured_vx = sim_vx; 
         ekf.predict(measured_vx, imu.gyroZ, dt);
+
+        // 📊 AFFICHAGE COMPARATIF DANS LE RADAR
+        // Tu vas pouvoir comparer "V_Commande" (0.05) et "V_Accel" (calculée par le capteur)
+        Serial.printf("🔍 [TEST ACCEL] AccX_Brut: %.3f m/s² | Acc_Filtre: %.3f m/s² | V_Accel: %.3f m/s² | V_Commande: %.2f\n", 
+                      imu.accX, pure_accel, v_accel, sim_vx);
     }
 
     // ==========================================
@@ -614,35 +615,36 @@ void loop() {
         switch (choix) {
             
             case '0': {
-                if (!tof_ok) { 
-                    Serial.println("⚠️ Les capteurs ToF ne sont pas initialisés."); 
-                    break; 
-                }
-                Serial.println("\n--- LECTURE DES CAPTEURS ToF (Pendant 10 secondes) ---");
-                Serial.println("Passez votre main devant les capteurs...");
-                Serial.println("Tapez 's' et Entrée pour arrêter plus tôt.");
-                
-                // On boucle 50 fois avec un délai de 200ms = 10 secondes max
-                for (int i = 0; i < 50; i++) {
-                    // Arrêt manuel si on tape 's'
-                    if (Serial.available() > 0 && Serial.read() == 's') {
-                        Serial.println("\n🛑 Arrêt manuel de la lecture.");
-                        break;
-                    }
-
-                    // 1. Mise à jour des données
-                    tof.update(); 
-                    
-                    // 2. Affichage
-                    tof.printStatus(); 
-                    
-                    // 3. Petit délai pour ne pas saturer la console (5 lectures par seconde)
-                    delay(200); 
-                }
-                
-                Serial.println("\n✅ Fin du test ToF.");
+        if (!tof_ok) { 
+            Serial.println("⚠️ Les capteurs ToF ne sont pas initialisés."); 
+            break; 
+        }
+        Serial.println("\n--- DASHBOARD TEMPS RÉEL : MATRICE ToF AVANT ---");
+        Serial.println("Passez votre main devant les 4 coins du bloc avant...");
+        Serial.println("Tapez 's' et Entrée pour arrêter le test.");
+        delay(1500); // Petit temps pour lire l'instruction avant le flux de données
+        
+        // 100 cycles * 200ms = 20 secondes de test dynamique
+        for (int i = 0; i < 100; i++) {
+            // Arrêt manuel si on tape 's'
+            if (Serial.available() > 0 && Serial.read() == 's') {
+                Serial.println("\n🛑 Arrêt manuel de la lecture.");
                 break;
             }
+
+            // 1. Mise à jour des lectures lasers
+            tof.update(); 
+            
+            // 2. 🎯 Affichage en grille 2x2 ultra-visuel
+            tof.printGridStatus(); 
+            
+            // 3. Cadence de rafraîchissement (5 Hz)
+            delay(200); 
+        }
+        
+        Serial.println("\n✅ Retour au menu principal.");
+        break;
+    }
             
             case '1': {
                 Serial.println("Scan I2C...");
@@ -774,7 +776,7 @@ void loop() {
                         Serial.printf("POS [X:%.2f Y:%.2f T:%.1f°] | WP: %d/%d | ToF: %d mm\n",
                             ekf.X(0), ekf.X(1), ekf.X(2) * 180.0/PI,
                             follower.getCurrentIndex() + 1, PATH_SIZE,
-                            tof.getFrontLeftDistance());
+                            tof.getTopLeftDistance());
                         last_print = now;
                     }
 
