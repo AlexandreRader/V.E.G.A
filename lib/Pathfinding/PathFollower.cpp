@@ -32,7 +32,7 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
     float dy = target.y - current_y;
     float distance = sqrt(dx * dx + dy * dy);
 
-    // 3. Vérifier si on est arrivé assez près du point
+    // 3. Vérifier si on est arrivé assez près du point (Zone de tolérance)
     if (distance < ARRIVAL_THRESHOLD) {
         currentIndex++; // On passe au point suivant
         
@@ -49,29 +49,52 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
     }
 
     // 4. Calculer l'erreur de cap (Heading Error)
-    float target_angle = atan2(dy, dx); // Angle absolu vers la cible
+    // On utilise dy, dx (au lieu de dx, dy) et on ajuste selon le sens des axes
+    
+    // NOUVEAU CALCUL DE L'ANGLE CIBLE (Pour s'aligner avec une boussole classique)
+    float target_angle = atan2(dy, dx); 
+    
+    // Si ta boussole a le Nord à 0°, l'Est à 90°, le Sud à 180° :
+    // L'axe X de la carte est l'Est, et l'axe Y est le Nord.
+    // L'équation mathématique standard pour la navigation devient souvent celle-ci :
+    target_angle = M_PI / 2.0 - target_angle; 
+    
+    // 🎯 CORRECTIF 1 : NORMALISATION ANTI ZIG-ZAG
     float angle_error = target_angle - current_theta;
-
-    // Normaliser l'erreur pour qu'elle reste entre -PI et +PI
-    // (Pour que le robot tourne du côté le plus court)
     while (angle_error > M_PI) angle_error -= 2.0 * M_PI;
     while (angle_error < -M_PI) angle_error += 2.0 * M_PI;
+    
+    // === ASTUCE DE DÉBOGAGE ABSOLUE ===
+    // Imprime ces valeurs pour voir si l'erreur d'angle tombe bien autour de zéro !
+    // Serial.printf("Cible: %.1f° | Actuel: %.1f° | Erreur: %.1f°\n", 
+    //               target_angle * 180/M_PI, current_theta * 180/M_PI, angle_error * 180/M_PI);
+    // ==================================
 
-// 5. Générer les commandes de vitesse (Profil dynamique)
+    // 5. Générer les commandes de vitesse
     
-    // On calcule le freinage dans les virages (1.0 = tout droit, 0.0 = virage à 90°)
-    float speed_factor = cos(angle_error);
-    
-    // On garde un minimum de 20% de la vitesse cible pour ne pas s'arrêter
-    if (speed_factor < 0.2) {
-        speed_factor = 0.2; 
+    // Ton idée : Tolérance de validation à +/- 1 degré (~0.017 rad)
+    float tolerance_angle = 0.017; 
+
+    // Si on est à plus de 20° d'erreur (0.35 rad) : Stop & Turn pur
+    if (abs(angle_error) > 0.35) { 
+        cmd.linear_v = 0.0; 
+        cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.8, 0.8);
+    } 
+    // Sinon, on est dans le bon cône de direction...
+    else {
+        // 🎯 TA LOGIQUE DE VALIDATION :
+        if (abs(angle_error) <= tolerance_angle) {
+            // Le cap est PARFAIT (+/- 1°). On valide !
+            cmd.linear_v = TARGET_SPEED_MS; // On roule à 0.05 m/s
+            cmd.angular_w = 0.0; // 🔒 On fige les roues droites devant !
+        } 
+        else {
+            // On est entre 1° et 20° : On avance tout en corrigeant la trajectoire en douceur
+            float speed_factor = cos(angle_error);
+            cmd.linear_v = TARGET_SPEED_MS * speed_factor;
+            cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.3, 0.3);
+        }
     }
-
-    // LA MAGIE EST ICI : On prend la vitesse max autorisée par le config.h,
-    // et on lui applique le facteur de freinage.
-    cmd.linear_v = TARGET_SPEED_MS * speed_factor;
-    
-    cmd.angular_w = Kp_ANGULAR * angle_error;
 
     return cmd;
 }

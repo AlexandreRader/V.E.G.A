@@ -32,20 +32,20 @@
 #define PIN_DIR_M1  1
 
 // Moteur 2 (Milieu Gauche)
-#define PIN_STEP_M2 38
-#define PIN_DIR_M2  21
+#define PIN_STEP_M2 40
+#define PIN_DIR_M2  39
 
 // Moteur 3 (Arrière Gauche)
-#define PIN_STEP_M3 42
-#define PIN_DIR_M3  41
+#define PIN_STEP_M3 38
+#define PIN_DIR_M3  21
 
 // Moteur 4 (Avant Droit)
-#define PIN_STEP_M4 40
-#define PIN_DIR_M4  39
+#define PIN_STEP_M4 17
+#define PIN_DIR_M4  18
 
 // Moteur 5 (Milieu Droit)
-#define PIN_STEP_M5 17
-#define PIN_DIR_M5  18
+#define PIN_STEP_M5 42
+#define PIN_DIR_M5  41
 
 // Moteur 6 (Arrière Droit)
 #define PIN_STEP_M6 15

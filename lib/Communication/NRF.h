@@ -11,6 +11,7 @@
 #define NRF_DATA_RATE       RF24_250KBPS
 #define NRF_PA_LEVEL        RF24_PA_MAX
 #define NRF_PAYLOAD_SIZE    32
+#define NRF_CMD_QUEUE_SIZE 32
 
 // Adresse du pipe de réception (groupe 4)
 static const uint64_t NRF_PIPE_ADDRESS = 0xE8E8F0F0A4LL;
@@ -71,18 +72,20 @@ private:
     RF24    _radio;
     uint8_t _cePin;
     uint8_t _csnPin;
+    unsigned long _lastRxTime = 0; // ⏱️ AJOUTE CETTE LIGNE ICI
+    //String  _cmdQueue[32];
 
     // Buffer de reconstruction des trames
     char    _rawBuf[NRF_CMD_BUFFER_SIZE];
     int     _rawLen;
 
     // File de commandes extraites (séparées par '\n')
-    String  _cmdQueue[16];
+    String  _cmdQueue[NRF_CMD_QUEUE_SIZE];
     uint8_t _cmdHead;
     uint8_t _cmdTail;
     uint8_t _cmdCount;
 
-    void _parseBuffer();
+    void _parseBuffer(bool force = false);
     void _enqueueCommand(const char* start, int len);
     bool _parseMissionString(String payload);
 };

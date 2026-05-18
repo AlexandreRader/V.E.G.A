@@ -46,10 +46,11 @@ public:
             steppers[i] = engine.stepperConnectToPin(PIN_STEP[i]);
             
             if (steppers[i]) {
-                steppers[i]->setDirectionPin(PIN_DIR[i]);
+                // Le deuxième paramètre "dirHighCountsUp" détermine le sens.
+                // Si INVERT_STEPPER est false, on envoie true (comportement normal).
+                // Si INVERT_STEPPER est true, on envoie false (comportement inversé).
+                steppers[i]->setDirectionPin(PIN_DIR[i], !INVERT_STEPPER[i]); 
                 
-                // On met une accélération très élevée car c'est ton EKF/PathFollower 
-                // qui va dicter les variations de vitesse en douceur.
                 steppers[i]->setAcceleration(50000); 
             }
         }
@@ -114,20 +115,22 @@ public:
             if (steppers[i]) steppers[i]->setCurrentPosition(0);
         }
     }
-
-    // Contrôle des servos (angles en radians)
+// Contrôle des servos (angles en radians)
     void setServoAngles(float fl, float fr, float rl, float rr) {
-        int angle_fl = constrain((fl * 180.0 / M_PI) + 90, 0, 180);
-        int angle_fr = constrain((fr * 180.0 / M_PI) + 90, 0, 180);
-        int angle_rl = constrain((rl * 180.0 / M_PI) + 90, 0, 180);
-        int angle_rr = constrain((rr * 180.0 / M_PI) + 90, 0, 180);
+        
+        // 1. Calcul des angles individuels avec leurs inversions et offsets
+        int angle_fl = constrain((fl * DIR_SERVO_FL * 180.0 / M_PI) + 90 + OFFSET_SERVO_FL, 0, 180);
+        int angle_fr = constrain((fr * DIR_SERVO_FR * 180.0 / M_PI) + 90 + OFFSET_SERVO_FR, 0, 180);
+        int angle_rl = constrain((rl * DIR_SERVO_RL * 180.0 / M_PI) + 90 + OFFSET_SERVO_RL, 0, 180);
+        int angle_rr = constrain((rr * DIR_SERVO_RR * 180.0 / M_PI) + 90 + OFFSET_SERVO_RR, 0, 180);
 
-        pwm.setAngle(1, angle_fl);  
-        pwm.setAngle(2, angle_fr);  
-        pwm.setAngle(3, angle_rl);  
-        pwm.setAngle(4, angle_rr);  
+        // 2. Envoi sur le BON port physique sans se poser de questions
+        pwm.setAngle(PORT_SERVO_FL, angle_fl);  
+        pwm.setAngle(PORT_SERVO_FR, angle_fr);  
+        pwm.setAngle(PORT_SERVO_RL, angle_rl);  
+        pwm.setAngle(PORT_SERVO_RR, angle_rr);  
     }
-
+    
     // Activation/Désactivation générale de la puissance des roues
     void enableMotors(bool enable) {
         motors_enabled = enable;

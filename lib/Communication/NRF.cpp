@@ -49,84 +49,96 @@ bool NRF_Comm::begin() {
 //  update()  — à appeler dans loop()
 // ─────────────────────────────────────────────────────────────────────────────
 bool NRF_Comm::update() {
-    if (!_radio.available()) return false;
+    // 1. LE CHRONOMÈTRE DE SÉCURITÉ
+    if (!_radio.available()) {
+        if (_rawLen > 0 && (millis() - _lastRxTime > 100)) {
+            Serial.println("⏱️ [NRF] Silence radio détecté. Forçage du décodage !");
+            _parseBuffer(true);
+        }
+        return false;
+    }
 
     uint8_t packet[NRF_PAYLOAD_SIZE];
     bool gotPacket = false;
 
+    // 2. LECTURE ULTRA-RAPIDE EN BOUCLE
     while (_radio.available()) {
-        _radio.read(packet, NRF_PAYLOAD_SIZE);
+    _radio.read(packet, NRF_PAYLOAD_SIZE);
+    _lastRxTime = millis();
 
-        // --- SÉCURITÉ 1 : Ignorer les paquets fantômes (uniquement des zéros) ---
-        bool allZeros = true;
-        for (int i = 0; i < NRF_PAYLOAD_SIZE; i++) {
-            if (packet[i] != 0) {
-                allZeros = false;
-                break;
-            }
+    // Ignorer les paquets 100% vides
+    bool allZeros = true;
+    for (int i = 0; i < NRF_PAYLOAD_SIZE; i++) {
+        if (packet[i] != 0) { allZeros = false; break; }
+    }
+    if (allZeros) continue;
+
+    gotPacket = true;
+
+    // ✅ CORRECTION : ne copier que jusqu'au premier \0 du padding
+    // Les \0 en fin de paquet sont du remplissage, pas des données
+    int usefulLen = NRF_PAYLOAD_SIZE;
+    for (int i = 0; i < NRF_PAYLOAD_SIZE; i++) {
+        if (packet[i] == '\0') {
+            usefulLen = i;
+            break;
         }
-        if (allZeros) continue; // Si c'est du vide, on passe au paquet suivant sans rien faire
-
-        gotPacket = true;
-
-        // --- Accumulation dans le buffer brut ---
-        int space = (NRF_CMD_BUFFER_SIZE - 1) - _rawLen;
-        if (space <= 0) {
-            _parseBuffer();
-            space = (NRF_CMD_BUFFER_SIZE - 1) - _rawLen;
-        }
-
-        int toCopy = min((int)NRF_PAYLOAD_SIZE, space);
-        memcpy(_rawBuf + _rawLen, packet, toCopy);
-        _rawLen += toCopy;
-
-        // --- SÉCURITÉ 2 : On commente le Serial.print de debug pour libérer la console ---
-        /*
-        Serial.print("[NRF] Paquet reçu : \"");
-        for (int i = 0; i < NRF_PAYLOAD_SIZE; i++) {
-            if (packet[i] >= 0x20 && packet[i] < 0x7F) Serial.print((char)packet[i]);
-            else if (packet[i] == '\n') Serial.print("\\n");
-            else if (packet[i] == '\0') Serial.print("\\0");
-            else Serial.printf("\\x%02X", packet[i]);
-        }
-        Serial.println("\"");
-        */
     }
 
-    if (gotPacket) _parseBuffer();
+    int space = (NRF_CMD_BUFFER_SIZE - 1) - _rawLen;
+    int toCopy = min(usefulLen, space);
+    if (toCopy > 0) {
+        memcpy(_rawBuf + _rawLen, packet, toCopy);
+        _rawLen += toCopy;
+    }
+}
+
+    if (gotPacket) _parseBuffer(false);
     return gotPacket;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  _parseBuffer()
-//  Découpe _rawBuf en lignes (séparées par '\n') et les enfile dans _cmdQueue.
 // ─────────────────────────────────────────────────────────────────────────────
-void NRF_Comm::_parseBuffer() {
+void NRF_Comm::_parseBuffer(bool force) {
     if (_rawLen == 0) return;
 
     bool foundLine = false;
-    for (int i = 0; i < _rawLen; i++) {
-        // Dès qu'on trouve un 'Entrée' (\n ou \r), on sait que le message est fini !
-        if (_rawBuf[i] == '\n' || _rawBuf[i] == '\r') {
-            _enqueueCommand(_rawBuf, i); // On traite tout le message reconstitué
-            
-            // On décale le reste du buffer s'il y a d'autres données après
-            int remaining = _rawLen - (i + 1);
-            if (remaining > 0) {
-                memmove(_rawBuf, _rawBuf + i + 1, remaining);
-                _rawLen = remaining;
-            } else {
-                _rawLen = 0;
+    int start = 0;
+
+    while (start < _rawLen && _cmdCount < NRF_CMD_QUEUE_SIZE) {
+        int end = -1;
+        for (int i = start; i < _rawLen; i++) {
+            // ⚠️ PAS de '\0' ici — les \0 sont du padding en milieu de mission !
+            if (_rawBuf[i] == '\n' || _rawBuf[i] == '\r' || _rawBuf[i] == '*') {
+                end = i;
+                break;
             }
+        }
+
+        if (end == -1) break;
+
+        if (end > start) {
+            _enqueueCommand(_rawBuf + start, end - start);
             foundLine = true;
-            break;
+        }
+        start = end + 1;
+
+        // Sauter les \0 de padding qui suivent le délimiteur
+        while (start < _rawLen && _rawBuf[start] == '\0') start++;
+    }
+
+    if (start > 0) {
+        int remaining = _rawLen - start;
+        if (remaining > 0) {
+            memmove(_rawBuf, _rawBuf + start, remaining);
+            _rawLen = remaining;
+        } else {
+            _rawLen = 0;
         }
     }
 
-    // 🎯 CORRECTION ICI : On ne force le traitement QUE si le grand buffer de 512 octets 
-    // est plein pour éviter qu'il n'explose. S'il n'est pas plein, on attend sagement 
-    // l'arrivée du reste des paquets de 32 octets !
-    if (!foundLine && _rawLen >= (NRF_CMD_BUFFER_SIZE - 1)) {
+    if (!foundLine && force && _rawLen > 0) {
         _enqueueCommand(_rawBuf, _rawLen);
         _rawLen = 0;
     }
@@ -135,32 +147,33 @@ void NRF_Comm::_parseBuffer() {
 //  _enqueueCommand()
 // ─────────────────────────────────────────────────────────────────────────────
 void NRF_Comm::_enqueueCommand(const char* start, int len) {
-    if (_cmdCount >= 16) return;
+    if (_cmdCount >= NRF_CMD_QUEUE_SIZE) {
+        Serial.println("⚠️ [NRF] File pleine ! Commande perdue.");
+        return;
+    }
 
     String newCmd = "";
-    for(int i = 0; i < len; i++) {
-        if(start[i] >= 0x20 && start[i] < 0x7F) { 
+    for (int i = 0; i < len; i++) {
+        if (start[i] >= 0x20 && start[i] < 0x7F) {
             newCmd += start[i];
         }
     }
 
     if (newCmd.length() > 0) {
-        // 🎯 INTERCEPTION DE LA MISSION
         if (newCmd.charAt(0) == 'M' || newCmd.charAt(0) == 'm') {
             Serial.printf("\n📡 [NRF] Trajectoire brute reçue (%d caractères). Traitement...\n", newCmd.length());
-            
             if (_parseMissionString(newCmd)) {
-                // On prévient le main.cpp avec un message simple au lieu de lui envoyer les 200 caractères
                 _cmdQueue[_cmdTail] = "MISSION_LOADED";
-                _cmdTail = (_cmdTail + 1) % 16;
+                _cmdTail = (_cmdTail + 1) % NRF_CMD_QUEUE_SIZE;
                 _cmdCount++;
+            } else {
+                Serial.printf("❌ [NRF] Mission non valide (%d car.) : %s\n", newCmd.length(), newCmd.c_str());
             }
-            return; // ⚠️ On quitte la fonction, on ne stocke pas le gros texte dans la file !
+            return;
         }
 
-        // Si ce n'est pas une mission, c'est une commande normale
         _cmdQueue[_cmdTail] = newCmd;
-        _cmdTail = (_cmdTail + 1) % 16;
+        _cmdTail = (_cmdTail + 1) % NRF_CMD_QUEUE_SIZE;
         _cmdCount++;
         Serial.printf("\n📡 [NRF] Commande validée : \"%s\"\n", newCmd.c_str());
     }
@@ -170,25 +183,34 @@ void NRF_Comm::_enqueueCommand(const char* start, int len) {
 //  _parseMissionString() - Le Cerveau du décodage
 // ─────────────────────────────────────────────────────────────────────────────
 bool NRF_Comm::_parseMissionString(String payload) {
-    PATH_SIZE = 0; 
-    
-    // 1. Extraire l'en-tête (Tout avant le premier ';')
+    PATH_SIZE = 0;
+
     int headerEnd = payload.indexOf(';');
     if (headerEnd == -1) return false;
 
-    String header = payload.substring(1, headerEnd); // On saute le 'M'
-    
-    // Découpage manuel de l'en-tête (6 valeurs séparées par des virgules)
+    String header = payload.substring(1, headerEnd);
+
     int idx[6], i = 0;
     int current_comma = header.indexOf(',');
     while (current_comma != -1 && i < 5) {
         idx[i++] = current_comma;
         current_comma = header.indexOf(',', current_comma + 1);
     }
-    
-    if (i == 5) { // Si on a bien trouvé 5 virgules (donc 6 valeurs)
-        START_X     = header.substring(0, idx[0]).toFloat();
-        START_Y     = header.substring(idx[0]+1, idx[1]).toFloat();
+
+    if (i == 5) {
+        float newStartX = header.substring(0, idx[0]).toFloat();
+        float newStartY = header.substring(idx[0]+1, idx[1]).toFloat();
+
+        // ✅ Si même point de départ qu'une mission déjà chargée → doublon, on ignore
+        if (mission_ready_to_start &&
+            abs(newStartX - START_X) < 0.01f &&
+            abs(newStartY - START_Y) < 0.01f) {
+            Serial.println("🔁 [NRF] Mission déjà chargée, doublon ignoré.");
+            return false;
+        }
+
+        START_X     = newStartX;
+        START_Y     = newStartY;
         START_THETA = header.substring(idx[1]+1, idx[2]).toFloat();
         GOAL_X      = header.substring(idx[2]+1, idx[3]).toFloat();
         GOAL_Y      = header.substring(idx[3]+1, idx[4]).toFloat();
@@ -197,6 +219,8 @@ bool NRF_Comm::_parseMissionString(String payload) {
         Serial.println("❌ [NRF] En-tête de mission invalide !");
         return false;
     }
+
+    // ... reste inchangé
 
     // 2. Extraire la liste des waypoints (Après le premier ';')
     int startIndex = headerEnd + 1;
@@ -213,6 +237,17 @@ bool NRF_Comm::_parseMissionString(String payload) {
         }
         startIndex = endIndex + 1;
         endIndex = payload.indexOf(';', startIndex);
+    }
+
+    // Si la dernière waypoint n'est pas terminée par un ';', traiter le reste
+    if (startIndex < payload.length() && PATH_SIZE < MAX_WAYPOINTS) {
+        String wpStr = payload.substring(startIndex);
+        int commaIndex = wpStr.indexOf(',');
+        if (commaIndex != -1) {
+            MISSION_PATH[PATH_SIZE].x = wpStr.substring(0, commaIndex).toFloat();
+            MISSION_PATH[PATH_SIZE].y = wpStr.substring(commaIndex + 1).toFloat();
+            PATH_SIZE++;
+        }
     }
 
     if (PATH_SIZE > 0) {
@@ -234,11 +269,10 @@ bool NRF_Comm::hasCommand() const {
 String NRF_Comm::readCommand() {
     if (_cmdCount == 0) return String();
     String cmd = _cmdQueue[_cmdHead];
-    _cmdHead = (_cmdHead + 1) % 16;
+    _cmdHead = (_cmdHead + 1) % NRF_CMD_QUEUE_SIZE;
     _cmdCount--;
     return cmd;
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  printStatus()
 // ─────────────────────────────────────────────────────────────────────────────

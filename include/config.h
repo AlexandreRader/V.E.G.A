@@ -6,14 +6,14 @@
 // ==========================================
 
 // --- Dimensions du Rover (en mètres) ---
-const float L_AXE = 0.20;            // Distance entre le centre et l'axe avant
-const float W_VOIE = 0.30;           // Largeur totale entre roues gauche et droite
-const float WHEEL_RADIUS = 0.05;     // Rayon des roues (5 cm)
+const float L_AXE = 0.101;            // Distance entre le centre et l'axe avant
+const float W_VOIE = 0.35;           // Largeur totale entre roues gauche et droite
+const float WHEEL_RADIUS = 0.045;     // Rayon des roues (5 cm)
 
 // --- Paramètres des Moteurs (Steppers) ---
 const float STEPS_PER_REV = 200.0;   // Moteurs 1.8° par pas
 const int MICROSTEPPING = 16;        // Drivers configurés en 1/16
-const float MAX_SPEED_HZ = 2000.0;   // Limite de sécurité logicielle
+const float MAX_SPEED_HZ = 100.0;   // Limite de sécurité logicielle
 
 // --- Constantes Calculées ---
 const float METERS_PER_STEP = (2.0 * M_PI * WHEEL_RADIUS) / (STEPS_PER_REV * MICROSTEPPING);
@@ -26,7 +26,7 @@ const float METERS_PER_STEP = (2.0 * M_PI * WHEEL_RADIUS) / (STEPS_PER_REV * MIC
 const float TARGET_SPEED_MS = 0.05; 
 
 const float ARRIVAL_THRESHOLD = 0.15; // Rayon de validation d'un point (15 cm)
-const float Kp_ANGULAR = 1.2;         // Gain de braquage (Force avec laquelle il tourne)
+const float Kp_ANGULAR = 0.5;         // Gain de braquage (Force avec laquelle il tourne) 1.2 avant
 
 // --- Paramètres IMU & Boussole ---
 // Déclinaison magnétique locale (Virton, BE = ~ +1.83°)
@@ -36,3 +36,37 @@ const float MAGNETIC_DECLINATION = 1.83;
 const int32_t MAG_OFFSET_X = -17;
 const int32_t MAG_OFFSET_Y = -20;
 const int32_t MAG_OFFSET_Z = -51;
+
+// ==========================================
+// CALIBRATION DE LA DIRECTION (OFFSETS)
+// ==========================================
+// Ajustez ces valeurs (en degrés, positif ou négatif) pour que 
+// chaque roue soit parfaitement droite quand la commande est à 0.
+#define OFFSET_SERVO_FL  0   // Offset Avant Gauche
+#define OFFSET_SERVO_FR  10 // Offset Avant Droit
+#define OFFSET_SERVO_RL  -6   // Offset Arrière Gauche
+#define OFFSET_SERVO_RR  -6   // Offset Arrière Droit
+
+// ==========================================
+// INVERSION DES SERVOS (SENS DE MONTAGE)
+// ==========================================
+// Mettez 1 pour un sens normal. Mettez -1 pour inverser le servo.
+#define DIR_SERVO_FL  -1   // Sens Avant Gauche
+#define DIR_SERVO_FR  -1   // Sens Avant Droit
+#define DIR_SERVO_RL  -1   // Sens Arrière Gauche
+#define DIR_SERVO_RR  -1   // Sens Arrière Droit
+// ==========================================
+// ROUTAGE PHYSIQUE DES SERVOS (PCA9685)
+// ==========================================
+#define PORT_SERVO_FL 3  // Le câble Avant-Gauche est physiquement sur le port 3
+#define PORT_SERVO_FR 4  // Le câble Avant-Droit est physiquement sur le port 4
+#define PORT_SERVO_RL 1  // Le câble Arrière-Gauche est physiquement sur le port 1
+#define PORT_SERVO_RR 2  // Le câble Arrière-Droit est physiquement sur le port 2
+
+
+// ==========================================
+// CALIBRATION DES MOTEURS PAS-À-PAS
+// ==========================================
+// Mettre à 'true' pour inverser le sens de rotation par défaut d'un moteur.
+// Ordre des index : [0]=FL, [1]=FR, [2]=ML, [3]=MR, [4]=RL, [5]=RR
+const bool INVERT_STEPPER[6] = {false, true, false, true, false, true}; // Exemple : inverse tout le côté droit
