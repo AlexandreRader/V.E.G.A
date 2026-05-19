@@ -67,13 +67,14 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
         last_debug_print = millis();
     }
 
-    float tolerance_angle = 0.1; // Tolérance en ligne droite (~3 degrés)
+    // Tolérance d'alignement en ligne droite (~4.5 degrés) pour éviter le zigzag
+    float tolerance_angle = 0.08; 
 
     // ==========================================================
     // 🎯 AUTOMATE À ÉTATS AVEC HYSTÉRÉSIS (Anti-tremblement)
     // ==========================================================
     static bool in_pivot_mode = false;
-    static unsigned long pivot_start_time = 0; // Timeout pour éviter de rester bloqué
+    static unsigned long pivot_start_time = 0; 
     const unsigned long PIVOT_TIMEOUT_MS = 3000; // 3 secondes max en pivot
 
     if (in_pivot_mode) {
@@ -89,10 +90,11 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
                          angle_error * 180.0 / M_PI);
         }
     } else {
-        // On ne déclenche un pivot sur place que si l'erreur dépasse 35° (0.61 rad)
-        if (abs(angle_error) > 0.61) {
+        // 🎯 AJUSTEMENT : On passe en pivot dès que l'erreur dépasse 8° (0.14 rad)
+        // afin de garantir que le robot ne dévie jamais trop en mode courbe
+        if (abs(angle_error) > 0.30) {
             in_pivot_mode = true;
-            pivot_start_time = millis(); // Enregistre le début du pivot
+            pivot_start_time = millis(); 
             Serial.println("🔄 [PathFollower] Écart important ! Déclenchement Pivot sur place.");
         }
     }
@@ -100,11 +102,14 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
     // ==========================================================
     // GÉNÉRATION DES COMMANDES SELON LE MODE STABILISÉ
     // ==========================================================
+    // 🎯 SÉCURITÉ TRACTION : On bride la vitesse nominale en courbe (ex: 0.25 m/s)
+    // pour donner un couple généreux aux Steppers et empêcher le glissement.
+    const float SAFE_TARGET_SPEED_MS = 0.25; 
+
     if (in_pivot_mode) {
-        // Pivot pur : Vitesse d'avance nulle pour laisser travailler la direction
         cmd.linear_v = 0.0; 
-        cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.5, 0.5);
-        // Debug: Affiche une fois par seconde
+        cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.25, 0.25);
+        
         static unsigned long last_mode_print = 0;
         if (millis() - last_mode_print > 1000) {
             Serial.printf("🔄 [PF MODE] PIVOT | AngularW: %.3f rad/s\n", cmd.angular_w);
@@ -112,11 +117,11 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
         }
     } 
     else {
-        // Mode Roulage : Le robot est globalement dans le bon axe
         if (abs(angle_error) <= tolerance_angle) {
-            // Ligne droite parfaite
+            // Ligne droite parfaite : ON FORCE LES SERVOS À ZÉRO ABSOLU
             cmd.linear_v = TARGET_SPEED_MS; 
-            cmd.angular_w = 0.0;
+            cmd.angular_w = 0.0; // W=0 force la cinématique à demander 0° aux servos
+            
             static unsigned long last_straight_print = 0;
             if (millis() - last_straight_print > 1000) {
                 Serial.printf("➡️  [PF MODE] STRAIGHT | V: %.2f m/s\n", cmd.linear_v);
@@ -124,20 +129,23 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
             }
         } 
         else {
-            // Correction douce en roulant
             float speed_factor = cos(angle_error);
-            // 🔴 SÉCURITÉ: Ne JAMAIS faire marcher le robot en arrière à cause de l'angle
-            // Si speed_factor < 0, cela veut dire qu'on essaie de tourner > 90°
-            // Dans ce cas, on remet à zéro le mode et on force un pivot
+            
             if (speed_factor < 0.0) {
                 in_pivot_mode = true;
                 pivot_start_time = millis();
                 cmd.linear_v = 0.0;
-                cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.5, 0.5);
+                cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.25, 0.25);
                 Serial.printf("🔴 [PF] SAFEGUARD: cos(angle_error)=%.2f < 0! Force PIVOT mode\n", speed_factor);
             } else {
                 cmd.linear_v = TARGET_SPEED_MS * speed_factor;
-                cmd.angular_w = constrain(Kp_ANGULAR * angle_error, -0.25, 0.25);
+                
+                // 🎯 AJUSTEMENT DU GAIN EN COURBE
+                // Si l'erreur est très faible (ex: moins de 3° / 0.05 rad), on n'exagère pas le braquage
+                float angular_gain_factor = (abs(angle_error) < 0.05) ? 1.0 : 2.0; 
+                
+                cmd.angular_w = constrain(Kp_ANGULAR * angle_error * angular_gain_factor, -0.40, 0.40);
+
                 static unsigned long last_curve_print = 0;
                 if (millis() - last_curve_print > 1000) {
                     Serial.printf("↗️  [PF MODE] CURVE | V: %.2f m/s | W: %.3f rad/s | Factor: %.2f\n", 

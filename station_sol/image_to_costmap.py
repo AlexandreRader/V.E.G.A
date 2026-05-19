@@ -11,7 +11,7 @@ import heapq
 # --- CONFIGURATION PHYSIQUE DE LA PISTE ---
 MAP_WIDTH_M = 4.0   
 MAP_HEIGHT_M = 4.0  
-CELL_SIZE_CM = 10.0 
+CELL_SIZE_CM = 5.0 
 
 # --- CONFIGURATION CALIBRATION ---
 CHESSBOARD_SIZE = (7, 7)    
@@ -19,7 +19,7 @@ SQUARE_SIZE = 1.0
 
 # --- CONFIGURATION TRAITEMENT ---
 ROBOT_WIDTH_CM = 30.0 
-SAFE_MARGIN_CM = 40.0 
+SAFE_MARGIN_CM = 20.0 
 
 # --- CALCULS CONSTANTS ---
 GRID_W = int((MAP_WIDTH_M * 100) / CELL_SIZE_CM)  
@@ -448,7 +448,10 @@ class CostmapApp:
             _, current = heapq.heappop(queue)
             curr_x, curr_y, curr_theta = current
             dist_to_goal = np.sqrt((curr_x - goal_w[0])**2 + (curr_y - goal_w[1])**2)
-            if dist_to_goal < 0.35:
+            
+            # 🎯 RECALIBRAGE : On passe le seuil de 35 cm à 8 cm (0.08)
+            # L'algorithme A* va chercher des points jusqu'à toucher virtuellement la cible B
+            if dist_to_goal < 0.08:
                 found_goal = current
                 break
             state_key = (round(curr_x / XY_RES), round(curr_y / XY_RES), round(curr_theta / THETA_RES))
@@ -473,7 +476,13 @@ class CostmapApp:
                     if weight >= 250: continue 
                     next_state = (next_x, next_y, next_theta)
                     steering_penalty = abs(steer) * 0.1
-                    new_cost = cost_so_far[current] + ARC_STEP_M + (weight / 50.0) + steering_penalty
+                    # ANCIEN CODE :
+                    # new_cost = cost_so_far[current] + ARC_STEP_M + (weight / 50.0) + steering_penalty
+
+                    # NOUVEAU CODE (Pénalité exponentielle) :
+                    # On transforme weight (0-255) en un coût exponentiel
+                    cost_factor = (weight / 255.0) ** 3.0  # Plus le poids est proche de 255, plus le coût explose
+                    new_cost = cost_so_far[current] + (ARC_STEP_M * (1.0 + cost_factor * 10.0)) + steering_penalty
                     if next_state not in cost_so_far or new_cost < cost_so_far[next_state]:
                         cost_so_far[next_state] = new_cost
                         priority = new_cost + np.sqrt((next_x - goal_w[0])**2 + (next_y - goal_w[1])**2)

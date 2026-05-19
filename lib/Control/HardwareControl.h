@@ -5,6 +5,8 @@
 #include "config.h"
 #include "FastAccelStepper.h"
 
+
+
 // ==========================================
 // GESTION DES ACTIONNEURS - VEGA SC317
 // ==========================================
@@ -51,7 +53,7 @@ public:
                 // Si INVERT_STEPPER est true, on envoie false (comportement inversé).
                 steppers[i]->setDirectionPin(PIN_DIR[i], !INVERT_STEPPER[i]); 
                 
-                steppers[i]->setAcceleration(50000); 
+                steppers[i]->setAcceleration(2500); 
             }
         }
 
@@ -168,4 +170,27 @@ public:
         pwm.setPwm(PORT_SERVO_RL, 0, 0);
         pwm.setPwm(PORT_SERVO_RR, 0, 0);
     }
+
+    void beep(unsigned int duration_ms) {
+        // Étape A : On allume le buzzer actif (Duty Cycle à 100% -> ON)
+        // Sur la lib Seeed, setPWM prend (canal, on_tick, off_tick). 
+        // 0 et 4096 force le signal à l'état HAUT permanent.
+        pwm.setPwm(BUZZER_CHANNEL, 0, 4095); 
+        
+        // Étape B : On attend le temps du bip
+        delay(duration_ms);
+        
+        // Étape C : On éteint le buzzer (Duty Cycle à 0% -> OFF)
+        pwm.setPwm(BUZZER_CHANNEL, 0, 0);
+    }
+
+// Version asynchrone si tu veux faire des bips sans bloquer le code avec un delay()
+    void setBuzzer(bool state) {
+        if (state) {
+            pwm.setPwm(BUZZER_CHANNEL, 0, 4095); // ON
+        } else {
+            pwm.setPwm(BUZZER_CHANNEL, 0, 0);    // OFF
+        }
+    }
+
 };

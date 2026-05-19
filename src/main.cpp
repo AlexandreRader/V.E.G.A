@@ -51,7 +51,7 @@ float START_THETA = 0.0;
 float GOAL_X = 0.0;
 float GOAL_Y = 0.0;
 float GOAL_THETA = 0.0;
-
+float initial_mission_theta = 0.0;
 
 void afficherMenu() {
     Serial.println("\n==========================================");
@@ -158,6 +158,7 @@ void modeTerminalSerie() {
             if (follower.isDone()) {
                 Serial.println("\n✅ MISSION TERMINÉE AVEC SUCCÈS !");
                 mission_active = false;
+                actuators.beep(600);
                 actuators.setStepperSpeeds(0,0,0,0,0,0);
                 actuators.enableMotors(false);
                 actuators.relaxServos();
@@ -199,9 +200,11 @@ void modeTerminalSerie() {
             else if (cmd.charAt(0) == 'M' || cmd.charAt(0) == 'm') {
                 Serial.println("📡 Trajectoire reçue via Serial. Décodage...");
                 if (decoderMissionManuelle(cmd)) {
+                    initial_mission_theta = START_THETA;
                     ekf.reset(START_X, START_Y, START_THETA);
                     follower.resetMission();
                     Serial.println("🎯 Robot localisé et prêt. Tapez 'START'.");
+
                 }
             }
             else {
@@ -210,6 +213,18 @@ void modeTerminalSerie() {
         }
     }
 }
+
+// 🎯 Fonction pour obtenir l'inclinaison combinée du robot en degrés
+float getCombinedTiltDeg() {
+    // roll et pitch sont déjà mis à jour en radians dans imu.updateEulerAngles()
+    float p = imu.pitch;
+    float r = imu.roll;
+    
+    // Calcul de la magnitude de l'inclinaison en radians, puis conversion en degrés
+    float tilt_rad = sqrt(p * p + r * r);
+    return tilt_rad * (180.0 / M_PI);
+}
+
 
 void calibrerServosInteractif(ActuatorManager& actuators) {
     Serial.println("\n==========================================");
@@ -341,8 +356,8 @@ void testerMoteursInteractif(ActuatorManager& actuators) {
 
 void setup() {
     Serial.begin(115200);
-    while(!Serial); 
-    delay(500); 
+    //while(!Serial); 
+    delay(3000); 
     
     Serial.println("\n🚀 Démarrage du Rover VEGA...");
 
@@ -383,7 +398,7 @@ void setup() {
     } else {
         Serial.println("⚠️ FAIL (ToF)");
     }
-
+    actuators.beep(150);
     afficherMenu();
 }
 
@@ -411,32 +426,46 @@ void updateNavigationTask(float dt) {
 
         ekf.predict(measured_vx, measured_omega, dt);
     } else {
-        // --- MODE RÉEL (SANS ACCÉLÉROMÈTRE ET SANS HACHAGE GYRO) ---
+        // --- MODE RÉEL OPTIMISÉ ASSERVI AUX COMPTEURS DE PAS ---
         imu.readMotion();
         imu.updateEulerAngles();
         tof.update(); 
 
-        // On fait confiance à la commande linéaire du PathFollower.
-        // Plus besoin de découper le signal avec le GyroZ : si le robot doit pivoter,
-        // le PathFollower met déjà de lui-même sim_vx à 0.0 !
-        measured_vx = sim_vx; 
+        // 🎯 LECTURE DE L'AVANCE PHYSIQUE RÉELLE DES MOTEURS (Encodeurs)
+        long current_steps_ML = actuators.getStepCount(2); // Compteur Milieu Gauche
+        long current_steps_MR = actuators.getStepCount(3); // Compteur Milieu Droit
+        
+        // Calcul des vitesses réelles mesurées sur les roues (en m/s)
+        float v_ML = ((current_steps_ML - last_steps_ML) * METERS_PER_STEP) / dt;
+        float v_MR = ((current_steps_MR - last_steps_MR) * METERS_PER_STEP) / dt;
+        
+        // Sauvegarde pour le prochain cycle
+        last_steps_ML = current_steps_ML;
+        last_steps_MR = current_steps_MR;
+
+        // La vitesse de l'EKF est la moyenne physique mesurée sur le sol
+        measured_vx = (v_ML + v_MR) / 2.0; 
+
+        // Sécurité : Si le PathFollower ordonne un arrêt complet (sim_vx == 0),
+        // on force measured_vx à 0 pour éviter le bruit résiduel
+        if (sim_vx == 0.0) {
+            measured_vx = 0.0;
+        }
 
         // 🔧 FILTRAGE PASSE-BAS DU GYROSCOPE (Low-Pass Filter)
-        // Réduit le bruit gyro (~±0.3 rad/s) sans retarder la réponse
-        // Constante de temps : 0.1 secondes
-        static float filtered_gyroZ = 0.0;
+        static float filtered_gyroZ = 0.05;
         float tau = 0.1; // Constante de temps (secondes)
         float alpha = dt / (dt + tau);
         filtered_gyroZ += (imu.gyroZ - filtered_gyroZ) * alpha;
         measured_omega = filtered_gyroZ;
 
-        // Prédiction EKF avec gyro lissé
+        // L'EKF prédit la position UNIQUEMENT si les roues tournent physiquement !
         ekf.predict(measured_vx, measured_omega, dt);
 
         // Affichage épuré à 10Hz pour le débogage de navigation
         static unsigned long last_debug_print = 0;
         if (millis() - last_debug_print > 100) {
-            Serial.printf("🔍 [NAV] V_Cmd: %.2f | V_EKF: %.2f | GyroZ: %.3f rad/s | Cap: %.1f°\n", 
+            Serial.printf("🔍 [NAV] V_Cmd: %.2f | V_Real: %.2f | GyroZ: %.3f rad/s | Cap: %.1f°\n", 
                           sim_vx, measured_vx, measured_omega, ekf.X(2) * 180.0 / M_PI);
             last_debug_print = millis();
         }
@@ -447,7 +476,34 @@ void updateNavigationTask(float dt) {
     // ==========================================
     VelocityCommand cmd = follower.update(ekf.X(0), ekf.X(1), ekf.X(2));
 
-    // On mémorise cette commande pour qu'elle devienne le "sim_vx" du PROCHAIN cycle
+    // ==========================================
+    // 🎯 SÉCURITÉ FRANCHISSEMENT DE RELIEF (IMU)
+    // ==========================================
+    float tilt = getCombinedTiltDeg(); // Récupération de l'angle combiné (Pitch + Roll)
+    float k_terrain = 1.0;             // Facteur multiplicateur par défaut ( Terrain plat )
+
+    const float TILT_THRESHOLD_START = 6.0;  // À partir de 6° d'inclinaison, on commence à freiner
+    const float TILT_THRESHOLD_MAX = 22.0;   // À 22° d'inclinaison, on est au ralentissement maximum
+    const float MIN_SPEED_FACTOR = 0.1;     // Vitesse plancher (35%) pour garder du couple sans caler
+
+    if (tilt > TILT_THRESHOLD_START) {
+        // Calcul d'une rampe linéaire entre les deux seuils d'inclinaison
+        float truncation = (tilt - TILT_THRESHOLD_START) / (TILT_THRESHOLD_MAX - TILT_THRESHOLD_START);
+        k_terrain = 1.0 - truncation * (1.0 - MIN_SPEED_FACTOR);
+        k_terrain = constrain(k_terrain, MIN_SPEED_FACTOR, 1.0);
+        
+        // Affichage à 1Hz dans le terminal pour suivre le comportement en relief
+        static unsigned long last_tilt_print = 0;
+        if (millis() - last_tilt_print > 1000) {
+            Serial.printf("⚠️ [IMU RELIEF] Châssis incliné à %.1f° | Vitesse bridée à %.0f%%\n", tilt, k_terrain * 100.0);
+            last_tilt_print = millis();
+        }
+    }
+
+    // On applique le coefficient sur la vitesse linéaire
+    cmd.linear_v = cmd.linear_v * k_terrain;
+
+    // On mémorise la commande finale pour le prochain cycle de l'EKF
     sim_vx = cmd.linear_v;
     sim_omega = cmd.angular_w;
 
@@ -462,12 +518,8 @@ void updateNavigationTask(float dt) {
     // Cinématique Inverse
     MotorCommands mc = kinematics.calculateDrive(cmd.linear_v, cmd.angular_w);
 
-    // 🚫 LIGNE SUPPRIMÉE POUR ÉVITER LE CONFLIT MATÉRIEL 
-    // actuators.setServoAngles(mc.angle_FL, mc.angle_FR, mc.angle_RL, mc.angle_RR);
-
     // 🎯 CONFIGURATION DE LA RAMPE DES SERVOS (Slew Rate)
-    // AUGMENTÉ pour répondre plus vite aux corrections - permet d'éviter les oscillations
-    const float MAX_SERVO_SPEED_RAD_S = 4.0;  // ↑ de 1.5 → 4.0 rad/s 
+    const float MAX_SERVO_SPEED_RAD_S = 2.0;  // Vitesse max de rotation autorisée
     float max_angle_change = MAX_SERVO_SPEED_RAD_S * dt; 
 
     static float filtered_FL = 0.0;
@@ -475,7 +527,7 @@ void updateNavigationTask(float dt) {
     static float filtered_RL = 0.0;
     static float filtered_RR = 0.0;
 
-    // Calcul de la rampe de lissage
+    // Calcul de la rampe de lissage pour chaque servomoteur
     filtered_FL += constrain(mc.angle_FL - filtered_FL, -max_angle_change, max_angle_change);
     filtered_FR += constrain(mc.angle_FR - filtered_FR, -max_angle_change, max_angle_change);
     filtered_RL += constrain(mc.angle_RL - filtered_RL, -max_angle_change, max_angle_change);
@@ -484,6 +536,7 @@ void updateNavigationTask(float dt) {
     // Envoi UNIQUE et propre des angles LISSÉS aux 4 Servomoteurs
     actuators.setServoAngles(filtered_FL, filtered_FR, filtered_RL, filtered_RR);
     
+    // Envoi des vitesses de traction calculées aux 6 moteurs pas-à-pas
     actuators.setStepperSpeeds(
         kinematics.speedToStepsHz(mc.speed_FL), kinematics.speedToStepsHz(mc.speed_FR),
         kinematics.speedToStepsHz(mc.speed_ML), kinematics.speedToStepsHz(mc.speed_MR),
@@ -500,6 +553,9 @@ void loop() {
         if (cmd == "MISSION_LOADED") {
             ekf.reset(START_X, START_Y, START_THETA); 
             follower.resetMission();
+            actuators.beep(80);
+            delay(80);
+            actuators.beep(80);
             Serial.println("🎯 Robot localisé et PathFollower prêt. En attente de 'START'...");
         } 
         else if (cmd == "START") {
@@ -543,12 +599,37 @@ void loop() {
             }
 
             if (follower.isDone()) {
-                Serial.println("\n✅ MISSION TERMINÉE AVEC SUCCÈS ! Objectif atteint.");
-                mission_active = false;
-                actuators.setStepperSpeeds(0,0,0,0,0,0);
-                actuators.enableMotors(false); 
-                actuators.relaxServos();
-            }
+        if (mission_active) {
+            mission_active = false;
+            
+            // Arrêt physique immédiat
+            actuators.setStepperSpeeds(0, 0, 0, 0, 0, 0);
+            actuators.relaxServos(); // Coupe le PWM pour éviter le sifflement
+            
+            Serial.println("\n✅ MISSION TERMINÉE AVEC SUCCÈS ! Objectif atteint.");
+            actuators.beep(600);
+            
+            // 🎯 RESET LOGIQUE SUR LES VRAIES VARIABLES DE TON DOSSIER DE CODE
+            // MISSION_PATH[0] contient le point A exact (X et Y de départ)
+            float reset_x = MISSION_PATH[0].x;
+            float reset_y = MISSION_PATH[0].y;
+            float reset_theta = initial_mission_theta; // On réapplique le cap sauvegardé au départ
+            
+            // Réinitialisation forcée des matrices de l'EKF
+            ekf.reset(reset_x, reset_y, reset_theta);
+            
+            // Réinitialisation de l'index interne du PathFollower pour la prochaine mission
+            follower.resetMission();
+            
+            // Remise à zéro des consignes de vitesse mémorisées
+            sim_vx = 0.0;
+            sim_omega = 0.0;
+            
+            Serial.printf("🔄 [RESET] Position recalée sur le départ initial -> X: %.2f m | Y: %.2f m | Cap: %.1f°\n", 
+                          reset_x, reset_y, reset_theta * 180.0 / M_PI);
+            Serial.println("📡 En attente d'une nouvelle commande 'START' par radio...\n");
+        }
+    }
         }
     }
 
@@ -676,6 +757,9 @@ void loop() {
                     if (follower.isDone()) {
                         Serial.println("\n✅ Mission terminée ! Arrivée au dernier point.");
                         mission_active = false;
+                        actuators.relaxServos();
+                        actuators.enableMotors(false);
+                        actuators.beep(600);
                     }
 
                     if (Serial.available() > 0 && Serial.read() == 's') {
