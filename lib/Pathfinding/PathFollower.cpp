@@ -79,7 +79,7 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
 
     if (in_pivot_mode) {
         // On reste en pivot sur place tant qu'on n'est pas aligné à moins de 5° (0.087 rad)
-        if (abs(angle_error) < 0.087) {
+        if (abs(angle_error) < 0.05) {
             in_pivot_mode = false;
             Serial.println("🎯 [PathFollower] Cap aligné ! Passage en mode roulage.");
         }
@@ -92,9 +92,9 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
     } else {
         // 🎯 AJUSTEMENT : On passe en pivot dès que l'erreur dépasse 8° (0.14 rad)
         // afin de garantir que le robot ne dévie jamais trop en mode courbe
-        if (abs(angle_error) > 0.30) {
-            in_pivot_mode = true;
-            pivot_start_time = millis(); 
+        if (abs(angle_error) > 0.50) { // On passe de 0.30 à 0.50 radians (environ 28°)
+        in_pivot_mode = true;
+        pivot_start_time = millis(); 
             Serial.println("🔄 [PathFollower] Écart important ! Déclenchement Pivot sur place.");
         }
     }
@@ -120,7 +120,7 @@ VelocityCommand PathFollower::update(float current_x, float current_y, float cur
         if (abs(angle_error) <= tolerance_angle) {
             // Ligne droite parfaite : ON FORCE LES SERVOS À ZÉRO ABSOLU
             cmd.linear_v = TARGET_SPEED_MS; 
-            cmd.angular_w = 0.0; // W=0 force la cinématique à demander 0° aux servos
+            //cmd.angular_w = 0.0; // W=0 force la cinématique à demander 0° aux servos
             
             static unsigned long last_straight_print = 0;
             if (millis() - last_straight_print > 1000) {

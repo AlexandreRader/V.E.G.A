@@ -572,6 +572,10 @@ void loop() {
             mission_active = false;
             actuators.setStepperSpeeds(0,0,0,0,0,0);
             actuators.enableMotors(false);
+            for(int i = 0; i < 3; i++) {
+                actuators.beep(100); // 100ms de son
+                delay(150);          // 150ms de silence entre les bips
+            }
         } 
         else if (cmd == "CALIB") {
             imu.calibrateMagnetometer();
@@ -613,9 +617,8 @@ void loop() {
             // MISSION_PATH[0] contient le point A exact (X et Y de départ)
             float reset_x = MISSION_PATH[0].x;
             float reset_y = MISSION_PATH[0].y;
-            float reset_theta = initial_mission_theta; // On réapplique le cap sauvegardé au départ
-            
-            // Réinitialisation forcée des matrices de l'EKF
+            // Remplacer par :
+            float reset_theta = ekf.X(2); // On conserve le cap actuel !
             ekf.reset(reset_x, reset_y, reset_theta);
             
             // Réinitialisation de l'index interne du PathFollower pour la prochaine mission
@@ -740,6 +743,7 @@ void loop() {
                 while (mission_active) {
                     unsigned long now = millis();
                     float dt = (now - last_time) / 1000.0;
+                    if (dt > 0.1) dt = 0.1; // Bride le dt à 100ms max pour éviter les sauts spatio-temporels
                     if (dt < 0.02) continue; 
                     last_time = now;
 
