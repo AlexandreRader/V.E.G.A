@@ -4,4 +4,4 @@
 __pycache__/
 *.pyc
 station_sol/images/*_temp.jpg
-
+station_sol/camera_calibrationImages/*
