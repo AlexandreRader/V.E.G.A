@@ -9,7 +9,7 @@
 
 const float L_AXE = 0.115;            // Distance entre le centre et l'axe avant
 const float W_VOIE = 0.30;           // Largeur totale entre roues gauche et droite
-const float WHEEL_RADIUS = 0.042; 
+const float WHEEL_RADIUS = 0.043; 
 
 //const float L_AXE = 0.101;            // Distance entre le centre et l'axe avant
 //const float W_VOIE = 0.35;           // Largeur totale entre roues gauche et droite
@@ -28,9 +28,9 @@ const float METERS_PER_STEP = (2.0 * M_PI * WHEEL_RADIUS) / (STEPS_PER_REV * MIC
 // ⚠️ LA VITESSE CIBLE GLOBALE DU ROVER (m/s) ⚠️
 // Commence à 0.10 m/s (10 cm/s) pour les tests sur table/sol.
 // Tu pourras l'augmenter à 0.30 m/s ou plus quand tu auras confiance.
-const float TARGET_SPEED_MS = 0.35;  // Vitesse de croisière fluide
+const float TARGET_SPEED_MS = 0.40;  // Vitesse de croisière fluide
 
-const float ARRIVAL_THRESHOLD = 0.15; // Rayon de validation d'un point (15 cm)
+const float ARRIVAL_THRESHOLD = 0.05; // Rayon de validation d'un point (15 cm)
 const float Kp_ANGULAR = 2.0;         // AUGMENTÉ de 0.2 → 0.5 pour réponse plus rapide
 
 // --- Paramètres IMU & Boussole ---

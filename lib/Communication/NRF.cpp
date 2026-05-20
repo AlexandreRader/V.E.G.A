@@ -188,41 +188,48 @@ bool NRF_Comm::_parseMissionString(String payload) {
     int headerEnd = payload.indexOf(';');
     if (headerEnd == -1) return false;
 
-    String header = payload.substring(1, headerEnd);
+    // header contient "8,2,0.6,1.52,1.4,2.5,1.97"
+    String header = payload.substring(1, headerEnd); 
+    
+    // 1. Extraire le NWP (ex: 8)
+    int firstComma = header.indexOf(',');
+    int expectedNWP = header.substring(0, firstComma).toInt();
+    
+    // 2. Extraire le reste SANS le NWP (ex: "2,0.6,1.52,1.4,2.5,1.97")
+    String coords = header.substring(firstComma + 1);
 
+    // 3. Découper les coordonnées
     int idx[6], i = 0;
-    int current_comma = header.indexOf(',');
+    // ⚠️ CRITIQUE : On utilise 'coords' et plus 'header' ici !
+    int current_comma = coords.indexOf(','); 
     while (current_comma != -1 && i < 5) {
         idx[i++] = current_comma;
-        current_comma = header.indexOf(',', current_comma + 1);
+        current_comma = coords.indexOf(',', current_comma + 1);
     }
 
     if (i == 5) {
-        float newStartX = header.substring(0, idx[0]).toFloat();
-        float newStartY = header.substring(idx[0]+1, idx[1]).toFloat();
+        float newStartX = coords.substring(0, idx[0]).toFloat();
+        float newStartY = coords.substring(idx[0]+1, idx[1]).toFloat();
 
-        // ✅ Si même point de départ qu'une mission déjà chargée → doublon, on ignore
+        /* --- ON DÉSACTIVE CE TEST TROMPEUR ---
         if (mission_ready_to_start &&
             abs(newStartX - START_X) < 0.01f &&
             abs(newStartY - START_Y) < 0.01f) {
             Serial.println("🔁 [NRF] Mission déjà chargée, doublon ignoré.");
             return false;
         }
+        */
 
+        // On accepte et on écrase directement les variables avec la nouvelle mission
         START_X     = newStartX;
         START_Y     = newStartY;
-        START_THETA = header.substring(idx[1]+1, idx[2]).toFloat();
-        GOAL_X      = header.substring(idx[2]+1, idx[3]).toFloat();
-        GOAL_Y      = header.substring(idx[3]+1, idx[4]).toFloat();
-        GOAL_THETA  = header.substring(idx[4]+1).toFloat();
-    } else {
-        Serial.println("❌ [NRF] En-tête de mission invalide !");
-        return false;
+        START_THETA = coords.substring(idx[1]+1, idx[2]).toFloat();
+        GOAL_X      = coords.substring(idx[2]+1, idx[3]).toFloat();
+        GOAL_Y      = coords.substring(idx[3]+1, idx[4]).toFloat();
+        GOAL_THETA  = coords.substring(idx[4]+1).toFloat();
     }
 
-    // ... reste inchangé
-
-    // 2. Extraire la liste des waypoints (Après le premier ';')
+    // 4. Extraire la liste des waypoints
     int startIndex = headerEnd + 1;
     int endIndex = payload.indexOf(';', startIndex);
 
@@ -239,7 +246,6 @@ bool NRF_Comm::_parseMissionString(String payload) {
         endIndex = payload.indexOf(';', startIndex);
     }
 
-    // Si la dernière waypoint n'est pas terminée par un ';', traiter le reste
     if (startIndex < payload.length() && PATH_SIZE < MAX_WAYPOINTS) {
         String wpStr = payload.substring(startIndex);
         int commaIndex = wpStr.indexOf(',');
@@ -250,13 +256,15 @@ bool NRF_Comm::_parseMissionString(String payload) {
         }
     }
 
-    if (PATH_SIZE > 0) {
-        mission_ready_to_start = true;
-        Serial.printf("✅ [NRF] Mission décodée : %d WP. Départ: [%.1f, %.1f, %.1f°]\n", 
-                      PATH_SIZE, START_X, START_Y, START_THETA * 180.0/M_PI);
-        return true;
+    // 5. VÉRIFICATION FINALE DE SÉCURITÉ
+    if (PATH_SIZE != expectedNWP) {
+        Serial.printf("❌ [NRF] Erreur WP : Attendu %d, reçu %d\n", expectedNWP, PATH_SIZE);
+        return false;
     }
-    return false;
+
+    mission_ready_to_start = true;
+    Serial.printf("✅ [NRF] Mission validée : %d/%d WP reçus.\n", PATH_SIZE, expectedNWP);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

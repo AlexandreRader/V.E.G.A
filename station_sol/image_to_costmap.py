@@ -11,7 +11,7 @@ import heapq
 # --- CONFIGURATION PHYSIQUE DE LA PISTE ---
 MAP_WIDTH_M = 4.0   
 MAP_HEIGHT_M = 4.0  
-CELL_SIZE_CM = 5.0 
+CELL_SIZE_CM = 10.0 
 
 # --- CONFIGURATION CALIBRATION ---
 CHESSBOARD_SIZE = (7, 7)    
@@ -26,13 +26,18 @@ GRID_W = int((MAP_WIDTH_M * 100) / CELL_SIZE_CM)
 GRID_H = int((MAP_HEIGHT_M * 100) / CELL_SIZE_CM) 
 SCALE_UI = 10 
 
+# --- INITIALISATION ARUCO ---
+aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+aruco_params = cv2.aruco.DetectorParameters()
+aruco_detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+
 
 class ZoomableCanvas:
     """Classe optimisée pour ajouter le support du Zoom, Pan et clics filtrés"""
     def __init__(self, canvas, on_click_callback, allow_drag_click=True):
         self.canvas = canvas
         self.on_click_callback = on_click_callback
-        self.allow_drag_click = allow_drag_click # Permet de bloquer le drag pour éviter les multi-clics
+        self.allow_drag_click = allow_drag_click
         
         self.image_id = None
         self.cv_img = None
@@ -45,20 +50,21 @@ class ZoomableCanvas:
         self.start_y = 0
         
         self._redraw_pending = False
-        
-        # Bind des commandes de déplacement et zoom (Clic Droit et Molette)
+
+        # --- DÉPLACEMENT (PAN) AU CLIC DROIT ---
         self.canvas.bind("<ButtonPress-3>", self.start_pan)
         self.canvas.bind("<B3-Motion>", self.execute_pan)
+        
         self.canvas.bind("<MouseWheel>", self.zoom)
         self.canvas.bind("<Button-4>", self.zoom)   
         self.canvas.bind("<Button-5>", self.zoom)   
         
-        # Clic gauche unitaire
-        self.canvas.bind("<ButtonPress-1>", self.handle_click_press)
+        # --- INTERACTIONS (CLIC GAUCHE) ---
+        self.canvas.bind("<ButtonPress-1>", lambda e: self.process_event(e, tk.EventType.ButtonPress))
+        self.canvas.bind("<ButtonRelease-1>", lambda e: self.process_event(e, tk.EventType.ButtonRelease))
         
-        # Le mouvement au clic gauche n'est activé que si explicitement autorisé (ex: Pinceau Costmap)
         if self.allow_drag_click:
-            self.canvas.bind("<B1-Motion>", self.handle_click_drag)
+            self.canvas.bind("<B1-Motion>", lambda e: self.process_event(e, tk.EventType.Motion))
 
     def set_image(self, cv_img, reset_view=False):
         self.cv_img = cv_img
@@ -134,13 +140,7 @@ class ZoomableCanvas:
         
         self.request_redraw()
 
-    def handle_click_press(self, event):
-        self.process_click(event, event_type=tk.EventType.ButtonPress)
-
-    def handle_click_drag(self, event):
-        self.process_click(event, event_type=tk.EventType.Motion)
-
-    def process_click(self, event, event_type):
+    def process_event(self, event, event_type):
         if self.cv_img is None:
             return
         real_x = int((event.x - self.pan_x) / self.zoom_level)
@@ -158,7 +158,7 @@ class ZoomableCanvas:
 class CostmapApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Station Sol - Éditeur de Mission VEGA SC317 (Lissé & Couleurs Corrigées)")
+        self.root.title("Station Sol - Éditeur de Mission VEGA SC317")
         self.root.geometry("1400x850") 
 
         self.start_angle = tk.IntVar(value=0) 
@@ -167,7 +167,7 @@ class CostmapApp:
         self.original_img = None
         self.warped_img = None
         self.costmap_grid = None 
-        self.current_path = [] 
+        self.current_path = [] # C'est ici que l'A* stocke ses points : list of tuples (x, y)
         self.camera_matrix = None
         self.dist_coeffs = None
         self.calibration_file = None
@@ -175,6 +175,9 @@ class CostmapApp:
         self.points_source = [] 
         self.start_pos = None 
         self.end_pos = None   
+
+        # --- VARIABLE POUR L'ÉDITION ---
+        self.selected_path_idx = None # Index du point A* en cours de déplacement
         
         # Outils
         self.right_tool_mode = tk.StringVar(value="none")
@@ -197,18 +200,19 @@ class CostmapApp:
         tk.Button(btn_frame, text="1. Charger l'image", command=self.load_image, bg="#4CAF50", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="Calibrer Caméra", command=self.calibrate_camera, bg="#607D8B", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="Charger Calib.", command=self.load_calibration, bg="#795548", **btn_style).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="✨ Détection Auto (ArUco)", command=self.detect_features, bg="#FFD700", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="2. Redresser (Perspective)", command=self.correct_perspective, bg="#9C27B0", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="3. Générer Costmap", command=self.process_image, bg="#2196F3", **btn_style).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="4. Calculer Trajectoire", command=self.run_pathfinding, bg="#e74c3c", **btn_style).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="4. Calculer Trajectoire A*", command=self.run_pathfinding, bg="#e74c3c", **btn_style).pack(side=tk.LEFT, padx=10)
         tk.Button(btn_frame, text="5. Exporter Mission C++", command=self.export_code, bg="#FF9800", **btn_style).pack(side=tk.RIGHT, padx=20)
         
         self.canvas_frame = tk.Frame(self.root)
         self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=20)
         
-        # GAUCHE : Bloc d'origine (SÉCURISÉ : allow_drag_click=False pour éviter les multi-clics fantômes)
+        # GAUCHE : Bloc d'origine
         orig_frame = tk.Frame(self.canvas_frame)
         orig_frame.pack(side=tk.LEFT, padx=10)
-        tk.Label(orig_frame, text="Caméra Originale (Clic gauche franc pour les 4 coins)", font=("Arial", 11, "bold")).pack()
+        tk.Label(orig_frame, text="Caméra Originale", font=("Arial", 11, "bold")).pack()
         
         self.canvas_orig = tk.Canvas(orig_frame, width=500, height=500, bg="#ddd", borderwidth=2, relief="groove")
         self.canvas_orig.pack()
@@ -234,7 +238,7 @@ class CostmapApp:
         tk.Label(row3, text="Filtre:", width=12, anchor="e").pack(side=tk.LEFT)
         tk.Scale(row3, from_=10, to=5000, orient=tk.HORIZONTAL, variable=self.min_area, showvalue=1, resolution=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # DROITE : Costmap (allow_drag_click=True pour permettre de peindre au pinceau en glissant)
+        # DROITE : Costmap
         cost_frame = tk.Frame(self.canvas_frame)
         cost_frame.pack(side=tk.LEFT, padx=20)
         tk.Label(cost_frame, text="Costmap Intégrée", font=("Arial", 11, "bold")).pack()
@@ -246,7 +250,11 @@ class CostmapApp:
         right_toolbar = tk.Frame(cost_frame, pady=5)
         right_toolbar.pack(fill=tk.X)
         tk.Radiobutton(right_toolbar, text="Sélection", variable=self.right_tool_mode, value="none").pack(side=tk.LEFT)
-        tk.Radiobutton(right_toolbar, text="🖌️ Édition", variable=self.right_tool_mode, value="brush", font=("Arial", 9, "bold")).pack(side=tk.LEFT)
+        tk.Radiobutton(right_toolbar, text="🖌️ Édition Map", variable=self.right_tool_mode, value="brush", font=("Arial", 9, "bold")).pack(side=tk.LEFT)
+        
+        # 🎯 LE NOUVEAU BOUTON EST ICI
+        tk.Radiobutton(right_toolbar, text="📍 Éditer Traj. Auto", variable=self.right_tool_mode, value="edit_path", fg="#E91E63", font=("Arial", 9, "bold")).pack(side=tk.LEFT, padx=10)
+        
         tk.Label(right_toolbar, text="| Taille:").pack(side=tk.LEFT)
         tk.Scale(right_toolbar, from_=1, to=10, orient=tk.HORIZONTAL, variable=self.brush_size, length=50, showvalue=0).pack(side=tk.LEFT)
         tk.Label(right_toolbar, text=" Intensité:").pack(side=tk.LEFT)
@@ -343,13 +351,257 @@ class CostmapApp:
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur de chargement :\n{e}")
 
+    def detect_features(self):
+        """Détecte automatiquement les marqueurs ArUco et les cibles circulaires"""
+        if self.original_img is None:
+            messagebox.showwarning("Erreur", "Veuillez d'abord charger une image.")
+            return
+        
+        try:
+            # 🔍 ÉTAPE 1: Détection des marqueurs ArUco
+            self.lbl_status.config(text="🔍 Détection ArUco en cours...")
+            self.root.update()
+            
+            corners, ids, rejected = aruco_detector.detectMarkers(self.original_img)
+            
+            # Afficher les statistiques de détection
+            num_detected = len(ids) if ids is not None else 0
+            num_rejected = len(rejected) if rejected is not None else 0
+            
+            print(f"\n{'='*60}")
+            print(f"📊 RÉSULTATS DÉTECTION ARUCO:")
+            print(f"{'='*60}")
+            print(f"✓ Marqueurs détectés: {num_detected}")
+            print(f"✗ Marqueurs rejetés: {num_rejected}")
+            print(f"Image dimensions: {self.original_img.shape}")
+            
+            if ids is not None:
+                detected_ids = sorted([int(id[0]) for id in ids])
+                print(f"🏷️  IDs trouvés: {detected_ids}")
+                
+                # Afficher visually lesquels sont trouvés
+                marker_status = ""
+                for mid in [0, 1, 2, 3]:
+                    if mid in detected_ids:
+                        marker_status += f"✅ ID {mid}  "
+                    else:
+                        marker_status += f"❌ ID {mid}  "
+                print(f"Statut détaillé: {marker_status}")
+            
+            if ids is not None and len(ids) >= 4:
+                # Créer un dictionnaire des positions des marqueurs
+                marker_positions = {}
+                for i in range(len(ids)):
+                    marker_id = int(ids[i][0])
+                    marker_center = corners[i][0].mean(axis=0)
+                    marker_positions[marker_id] = marker_center
+                    print(f"   Marqueur {marker_id}: position {marker_center}")
+                
+                print(f"\n🎯 Marqueurs requis: [0, 1, 2, 3]")
+                print(f"✓ Marqueurs trouvés: {list(marker_positions.keys())}")
+                
+                # Supposer l'ordre : 0=TL, 1=TR, 2=BR, 3=BL
+                if all(mid in marker_positions for mid in [0, 1, 2, 3]):
+                    print("✅ Tous les marqueurs requis sont présents!")
+                    
+                        # ----------------------------------------------------
+                    # CORRECTION DE L'ORIENTATION (Identique au mode Manuel)
+                    # ----------------------------------------------------
+                    pts_src = np.float32([
+                        marker_positions[0],  # Tag 0 -> Bas-Gauche
+                        marker_positions[1],  # Tag 1 -> Haut-Gauche
+                        marker_positions[2],  # Tag 2 -> Haut-Droite
+                        marker_positions[3]   # Tag 3 -> Bas-Droite
+                    ])
+                    
+                    dest_w = int(MAP_WIDTH_M * 100)
+                    dest_h = int(MAP_HEIGHT_M * 100)
+                    
+                    # On force les coordonnées de destination comme dans ton ancien code
+                    pts_dst = np.float32([
+                        [0, dest_h - 1],          # Destination du Tag 0
+                        [0, 0],                   # Destination du Tag 1
+                        [dest_w - 1, 0],          # Destination du Tag 2
+                        [dest_w - 1, dest_h - 1]  # Destination du Tag 3
+                    ])
+                    # ----------------------------------------------------
+                    
+                    print(f"\n📐 Transformation perspective:")
+                    print(f"   Sortie: {dest_w}x{dest_h} px")
+                    
+                    matrix = cv2.getPerspectiveTransform(pts_src, pts_dst)
+                    self.warped_img = cv2.warpPerspective(self.original_img, matrix, (dest_w, dest_h))
+                    self.points_source = pts_src.tolist()
+                    self.lbl_status.config(text="✅ Perspective corrigée via ArUco")
+                    
+                    # 🔍 ÉTAPE 2: Détection des cercles (cibles A et B)
+                    print(f"\n🔍 Détection des cercles cibles...")
+                    self.root.update()
+                    
+                    gray = cv2.cvtColor(self.warped_img, cv2.COLOR_BGR2GRAY)
+                    circles = cv2.HoughCircles(
+                        gray, 
+                        cv2.HOUGH_GRADIENT, 
+                        dp=1, 
+                        minDist=50, 
+                        param1=50, 
+                        param2=30, 
+                        minRadius=10, 
+                        maxRadius=50
+                    )
+                    
+                    if circles is not None:
+                        num_circles = len(circles[0])
+                        print(f"⭕ Cercles détectés: {num_circles}")
+                        for idx, circle in enumerate(circles[0]):
+                            print(f"   Cercle {idx}: x={int(circle[0])}, y={int(circle[1])}, r={int(circle[2])}")
+                        
+                        if num_circles >= 2:
+                            print("✅ Au moins 2 cercles trouvés!")
+                            circles = np.uint16(np.around(circles))
+                            # Trier par position x pour obtenir A (gauche) et B (droite)
+                            circle_list = sorted(circles[0], key=lambda c: c[0])
+                            self.start_pos = (int(circle_list[0][0] / CELL_SIZE_CM * 100 / CELL_SIZE_CM), 
+                                            int(circle_list[0][1] / CELL_SIZE_CM * 100 / CELL_SIZE_CM))
+                            self.end_pos = (int(circle_list[-1][0] / CELL_SIZE_CM * 100 / CELL_SIZE_CM), 
+                                           int(circle_list[-1][1] / CELL_SIZE_CM * 100 / CELL_SIZE_CM))
+                            
+                            print(f"\n✅ DÉTECTION RÉUSSIE!")
+                            print(f"   Point A (départ): {self.start_pos}")
+                            print(f"   Point B (cible): {self.end_pos}")
+                            print(f"{'='*60}\n")
+                            
+                            self.lbl_status.config(text="✅ Marqueurs ArUco et cibles détectées automatiquement")
+                            messagebox.showinfo("Succès", f"✨ Détection automatique réussie !\n\n"
+                                              f"Perspective corrigée\n"
+                                              f"Marqueurs ArUco: {detected_ids}\n"
+                                              f"Cercles trouvés: {num_circles}\n"
+                                              f"Point A: {self.start_pos}\n"
+                                              f"Point B: {self.end_pos}")
+                        else:
+                            print(f"⚠️  Seulement {num_circles} cercle(s) trouvé(s), minimum 2 requis")
+                            print(f"💡 Essayez d'ajuster les paramètres Hough Circle:")
+                            print(f"   - minDist: distance min entre cercles")
+                            print(f"   - param1: Canny threshold")
+                            print(f"   - param2: center detection threshold")
+                            print(f"   - minRadius/maxRadius: plages de rayon")
+                            print(f"{'='*60}\n")
+                            
+                            self.lbl_status.config(text="⚠️ Perspective OK mais cibles non trouvées")
+                            messagebox.showwarning("Détection Partielle", 
+                                                 f"Marqueurs ArUco détectés: {detected_ids}\n\n"
+                                                 f"❌ Seulement {num_circles} cercle(s) trouvé(s)\n"
+                                                 f"   (minimum 2 requis)\n\n"
+                                                 f"💡 Vérifiez que:\n"
+                                                 f"   • Les cibles sont visibles\n"
+                                                 f"   • Les cibles sont circulaires\n"
+                                                 f"   • L'éclairage est suffisant")
+                    else:
+                        print(f"⚠️  Aucun cercle détecté")
+                        print(f"💡 Les paramètres Hough Circle doivent être ajustés")
+                        print(f"   Vérifiez: contraste, éclairage, dimensions des cibles")
+                        print(f"{'='*60}\n")
+                        
+                        self.lbl_status.config(text="⚠️ Perspective OK, aucune cible détectée")
+                        messagebox.showwarning("Détection Échouée", 
+                                             f"Marqueurs ArUco OK: {detected_ids}\n\n"
+                                             f"❌ Aucun cercle détecté\n\n"
+                                             f"💡 Vérifiez:\n"
+                                             f"   • Les cibles sont bien visibles\n"
+                                             f"   • Les cibles sont circulaires\n"
+                                             f"   • Le contraste est suffisant")
+                    
+                    self.zoom_orig.set_image(self.warped_img, reset_view=True)
+                else:
+                    missing = [m for m in [0, 1, 2, 3] if m not in marker_positions]
+                    print(f"❌ Marqueurs manquants: {missing}")
+                    
+                    # Afficher le statut détaillé
+                    print(f"\n📋 Récapitulatif détection:")
+                    for mid in [0, 1, 2, 3]:
+                        if mid in marker_positions:
+                            print(f"   ✅ Marqueur {mid}: TROUVÉ")
+                        else:
+                            print(f"   ❌ Marqueur {mid}: MANQUANT")
+                    print(f"{'='*60}\n")
+                    
+                    # Détail de chaque ID manquant
+                    missing_str = ", ".join([f"ID {m}" for m in missing])
+                    detail_msg = "Trouvés:\n"
+                    for mid in detected_ids:
+                        detail_msg += f"  ✅ ID {mid}\n"
+                    detail_msg += f"\nManquants:\n"
+                    for mid in missing:
+                        detail_msg += f"  ❌ ID {mid}\n"
+                    
+                    messagebox.showwarning("Erreur ArUco", 
+                                         f"❌ Les 4 marqueurs attendus (0,1,2,3) ne sont pas tous présents.\n\n"
+                                         f"{detail_msg}\n"
+                                         f"💡 Assurez-vous que:\n"
+                                         f"   • Les 4 marqueurs sont visibles\n"
+                                         f"   • Les IDs des marqueurs sont correctement assignés\n"
+                                         f"   • Les marqueurs sont aux 4 coins")
+            else:
+                print(f"❌ Impossible de détecter 4 marqueurs")
+                print(f"   Trouvés: {num_detected}")
+                if num_rejected > 0:
+                    print(f"   Rejetés: {num_rejected}")
+                
+                # Afficher quels IDs ont été trouvés
+                if ids is not None and num_detected > 0:
+                    detected_ids = sorted([int(id[0]) for id in ids])
+                    print(f"\n🏷️  IDs détectés: {detected_ids}")
+                    print(f"Statut détaillé:")
+                    for mid in [0, 1, 2, 3]:
+                        if mid in detected_ids:
+                            print(f"   ✅ ID {mid}: trouvé")
+                        else:
+                            print(f"   ❌ ID {mid}: manquant")
+                
+                print(f"\n💡 Suggestions:")
+                print(f"   • Assurez-vous que l'image contient 4 marqueurs ArUco (DICT_4X4_50)")
+                print(f"   • Les marqueurs doivent être aux 4 coins avec les IDs 0,1,2,3")
+                print(f"   • Vérifiez l'éclairage et le contraste")
+                print(f"   • Les marqueurs ne doivent pas être partiellement coupés")
+                print(f"{'='*60}\n")
+                
+                # Message d'erreur amélioré
+                if ids is not None and num_detected > 0:
+                    detected_ids = sorted([int(id[0]) for id in ids])
+                    missing = [m for m in [0, 1, 2, 3] if m not in detected_ids]
+                    found_str = ", ".join([f"ID {m}" for m in detected_ids])
+                    missing_str = ", ".join([f"ID {m}" for m in missing])
+                    detail_msg = f"Détecté: {found_str}\nManquant: {missing_str}"
+                else:
+                    detail_msg = "Aucun marqueur ArUco détecté"
+                
+                self.lbl_status.config(text=f"❌ Seulement {num_detected} marqueur(s) détecté(s)")
+                messagebox.showwarning("Erreur ArUco", 
+                                     f"❌ Impossible de détecter 4 marqueurs ArUco.\n\n"
+                                     f"{detail_msg}\n\n"
+                                     f"💡 Vérifiez:\n"
+                                     f"   • L'image contient 4 marqueurs ArUco\n"
+                                     f"   • Les IDs sont 0, 1, 2, 3\n"
+                                     f"   • L'éclairage et le contraste\n"
+                                     f"   • Les marqueurs ne sont pas masqués")
+        
+        except Exception as e:
+            print(f"\n❌ ERREUR DÉTECTION: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print(f"{'='*60}\n")
+            
+            messagebox.showerror("Erreur Détection", 
+                               f"❌ Erreur lors de la détection:\n\n{str(e)}\n\n"
+                               f"💡 Consultez la console pour plus de détails")
+            self.lbl_status.config(text=f"❌ Erreur détection")
+
     def reset_points(self):
         self.points_source = []
         if self.original_img is not None:
             self.zoom_orig.set_image(self.get_display_image(self.original_img))
 
     def on_canvas_orig_click(self, event):
-        # Sécurité anti multi-clics : on n'enregistre que sur un appui franc (ButtonPress)
         if event.type != tk.EventType.ButtonPress:
             return
             
@@ -371,12 +623,15 @@ class CostmapApp:
             return
         rect_ordered = np.array(self.points_source, dtype="float32")
         dest_w, dest_h = int(MAP_WIDTH_M * 100), int(MAP_HEIGHT_M * 100)
+        
+        # ✅ CORRECTION : Ordre standard (Haut-Gauche, Haut-Droite, Bas-Droite, Bas-Gauche)
         points_dest = np.float32([
-            [0, dest_h - 1],
-            [0, 0],
-            [dest_w - 1, 0],
-            [dest_w - 1, dest_h - 1]
+            [0, 0],                   # Clic 1 : DOIT ÊTRE HAUT-GAUCHE
+            [dest_w - 1, 0],          # Clic 2 : DOIT ÊTRE HAUT-DROITE
+            [dest_w - 1, dest_h - 1], # Clic 3 : DOIT ÊTRE BAS-DROITE
+            [0, dest_h - 1]           # Clic 4 : DOIT ÊTRE BAS-GAUCHE
         ])
+        
         src_img = self.get_display_image(self.original_img)
         matrix = cv2.getPerspectiveTransform(rect_ordered, points_dest)
         self.warped_img = cv2.warpPerspective(src_img, matrix, (dest_w, dest_h))
@@ -449,8 +704,6 @@ class CostmapApp:
             curr_x, curr_y, curr_theta = current
             dist_to_goal = np.sqrt((curr_x - goal_w[0])**2 + (curr_y - goal_w[1])**2)
             
-            # 🎯 RECALIBRAGE : On passe le seuil de 35 cm à 8 cm (0.08)
-            # L'algorithme A* va chercher des points jusqu'à toucher virtuellement la cible B
             if dist_to_goal < 0.08:
                 found_goal = current
                 break
@@ -476,13 +729,10 @@ class CostmapApp:
                     if weight >= 250: continue 
                     next_state = (next_x, next_y, next_theta)
                     steering_penalty = abs(steer) * 0.1
-                    # ANCIEN CODE :
-                    # new_cost = cost_so_far[current] + ARC_STEP_M + (weight / 50.0) + steering_penalty
-
-                    # NOUVEAU CODE (Pénalité exponentielle) :
-                    # On transforme weight (0-255) en un coût exponentiel
-                    cost_factor = (weight / 255.0) ** 3.0  # Plus le poids est proche de 255, plus le coût explose
+                    
+                    cost_factor = (weight / 255.0) ** 3.0  
                     new_cost = cost_so_far[current] + (ARC_STEP_M * (1.0 + cost_factor * 10.0)) + steering_penalty
+                    
                     if next_state not in cost_so_far or new_cost < cost_so_far[next_state]:
                         cost_so_far[next_state] = new_cost
                         priority = new_cost + np.sqrt((next_x - goal_w[0])**2 + (next_y - goal_w[1])**2)
@@ -498,9 +748,10 @@ class CostmapApp:
         while curr is not None:
             gx = int(round((curr[0] * 100.0) / CELL_SIZE_CM))
             gy = int(round(GRID_H - 1 - (curr[1] * 100.0) / CELL_SIZE_CM))
-            path.append((gx, gy))
+            # On stocke en format liste [x, y] pour pouvoir le modifier plus tard
+            path.append([gx, gy]) 
             curr = came_from.get(curr)
-        self.current_path = path[::-1]
+        self.current_path = path[::-1] # On retourne pour avoir l'ordre Départ -> Cible
         
         total_dist = 0.0
         for i in range(1, len(self.current_path)):
@@ -515,9 +766,8 @@ class CostmapApp:
         disp_grid_large = cv2.resize(self.costmap_grid, (GRID_W*SCALE_UI, GRID_H*SCALE_UI), interpolation=cv2.INTER_NEAREST)
         heatmap_rgb = np.zeros((GRID_H*SCALE_UI, GRID_W*SCALE_UI, 3), dtype=np.uint8)
         
-        # 🎯 CORRECTIF BGR -> RGB POUR TINTER : Les obstacles (255) deviennent ROUGES, l'espace libre (0) devient BLEU
-        heatmap_rgb[:, :, 0] = disp_grid_large       # Canal R (Rouge) = Obstacles hauts
-        heatmap_rgb[:, :, 2] = 255 - disp_grid_large # Canal B (Bleu) = Espace libre
+        heatmap_rgb[:, :, 0] = disp_grid_large       
+        heatmap_rgb[:, :, 2] = 255 - disp_grid_large 
         
         alpha = self.overlay_alpha.get() / 100.0
         if alpha < 1.0 and self.warped_img is not None:
@@ -527,11 +777,18 @@ class CostmapApp:
         else:
             final_img = heatmap_rgb
             
+        # 🎯 DESSIN DU CHEMIN ET DES POINTS MODIFIABLES
         if hasattr(self, 'current_path') and len(self.current_path) > 1:
-            for i in range(1, len(self.current_path)):
-                p1 = (self.current_path[i-1][0]*SCALE_UI + SCALE_UI//2, self.current_path[i-1][1]*SCALE_UI + SCALE_UI//2)
-                p2 = (self.current_path[i][0]*SCALE_UI + SCALE_UI//2, self.current_path[i][1]*SCALE_UI + SCALE_UI//2)
-                cv2.line(final_img, p1, p2, (255, 255, 255), 2)
+            for i in range(len(self.current_path)):
+                cx, cy = int(self.current_path[i][0]*SCALE_UI + SCALE_UI//2), int(self.current_path[i][1]*SCALE_UI + SCALE_UI//2)
+                
+                # Tracer la ligne vers le point précédent
+                if i > 0:
+                    px, py = int(self.current_path[i-1][0]*SCALE_UI + SCALE_UI//2), int(self.current_path[i-1][1]*SCALE_UI + SCALE_UI//2)
+                    cv2.line(final_img, (px, py), (cx, cy), (255, 255, 255), 2)
+                    
+                # Dessiner le Point (plus gros pour pouvoir cliquer dessus)
+                cv2.circle(final_img, (cx, cy), 4, (0, 255, 255), -1)
 
         arrow_length = 30
         if self.start_pos:
@@ -554,8 +811,6 @@ class CostmapApp:
             cv2.circle(final_img, (cx, cy), 6, (255, 255, 255), -1)
             cv2.putText(final_img, "B", (cx-5, cy-15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # OpenCV travaille en BGR en interne, mais l'affichage final s'attend à du RGB. 
-        # Pour que la conversion finale de ZoomableCanvas fonctionne, on repasse en BGR.
         final_bgr = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
         self.zoom_cost.set_image(final_bgr, reset_view=reset_zoom_view)
 
@@ -564,12 +819,52 @@ class CostmapApp:
         mode = self.right_tool_mode.get()
         if mode == "none": return
 
-        # Sécurisation : pour placer A ou B, on exige un clic franc, pas un glissement
-        if mode in ["start", "end"] and event.type != tk.EventType.ButtonPress:
-            return
-
         gx, gy = int(event.x // SCALE_UI), int(event.y // SCALE_UI)
         if gx < 0 or gx >= GRID_W or gy < 0 or gy >= GRID_H: return
+
+        # ==========================================
+        # 🎯 LA MAGIE EST ICI : DÉPLACEMENT DES POINTS A*
+        # ==========================================
+        if mode == "edit_path" and len(self.current_path) > 0:
+            grab_tolerance_sq = 9 # Tolérance au carré (ex: 3 cases de distance max)
+            
+            if event.type == tk.EventType.ButtonPress:
+                best_idx = None
+                min_dist_sq = float('inf')
+                
+                # Cherche LE point le plus proche du clic (et non pas le premier trouvé)
+                for i in range(1, len(self.current_path) - 1):
+                    wp = self.current_path[i]
+                    # Calcul de la distance au carré (Pythagore sans la racine, plus rapide)
+                    dist_sq = (wp[0] - gx)**2 + (wp[1] - gy)**2
+                    
+                    if dist_sq < min_dist_sq and dist_sq <= grab_tolerance_sq:
+                        min_dist_sq = dist_sq
+                        best_idx = i
+                
+                # Si on a trouvé un point valide, on le sélectionne
+                if best_idx is not None:
+                    self.selected_path_idx = best_idx
+                    self.lbl_status.config(text=f"Déplacement du point {best_idx}...")
+                    return
+                            
+            elif event.type == tk.EventType.Motion and self.selected_path_idx is not None:
+                # Si on glisse la souris en maintenant le clic, on met à jour le point
+                self.current_path[self.selected_path_idx][0] = gx
+                self.current_path[self.selected_path_idx][1] = gy
+                self.update_costmap_canvas()
+                
+            elif event.type == tk.EventType.ButtonRelease:
+                if self.selected_path_idx is not None:
+                    self.lbl_status.config(text=f"Point {self.selected_path_idx} relâché à la nouvelle position.")
+                    self.selected_path_idx = None
+            return
+
+        # ==========================================
+        # ANCIENS MODES (A, B, Pinceau)
+        # ==========================================
+        if mode in ["start", "end"] and event.type != tk.EventType.ButtonPress:
+            return
 
         if mode == "start" and event.type == tk.EventType.ButtonPress: 
             self.start_pos = (gx, gy)
@@ -582,31 +877,43 @@ class CostmapApp:
             self.update_costmap_canvas()
             self.lbl_status.config(text=f"🔴 Point cible B posé en case [{gx}, {GRID_H - 1 - gy}]")
         elif mode == "brush": 
-            val = self.brush_cost.get() 
-            radius = self.brush_size.get() - 1 
-            y_min, y_max = max(0, gy - radius), min(GRID_H, gy + radius + 1)
-            x_min, x_max = max(0, gx - radius), min(GRID_W, gx + radius + 1)
-            self.costmap_grid[y_min:y_max, x_min:x_max] = val
-            self.current_path = []
-            self.update_costmap_canvas()
+            if event.type in [tk.EventType.ButtonPress, tk.EventType.Motion]:
+                val = self.brush_cost.get() 
+                radius = self.brush_size.get() - 1 
+                y_min, y_max = max(0, gy - radius), min(GRID_H, gy + radius + 1)
+                x_min, x_max = max(0, gx - radius), min(GRID_W, gx + radius + 1)
+                self.costmap_grid[y_min:y_max, x_min:x_max] = val
+                self.current_path = []
+                self.update_costmap_canvas()
 
     def export_code(self):
-        if not self.current_path or not self.start_pos or not self.end_pos: 
-            messagebox.showerror("Erreur", "Veuillez d'abord calculer une trajectoire.")
+        if not self.start_pos or not self.end_pos or not self.current_path: 
+            messagebox.showerror("Erreur", "Placez A et B et calculez la trajectoire.")
             return
+            
         scale_factor = CELL_SIZE_CM / 100.0
+        
+        # Coordonnées réelles de départ
         start_x = self.start_pos[0] * scale_factor
         start_y = (GRID_H - 1 - self.start_pos[1]) * scale_factor
-        start_theta = np.radians(self.start_angle.get())
+        start_theta = np.radians(self.start_angle.get()) # ❌ PAS DE + np.pi ICI !
+        
+        # Coordonnées réelles d'arrivée
         goal_x = self.end_pos[0] * scale_factor
         goal_y = (GRID_H - 1 - self.end_pos[1]) * scale_factor
         goal_theta = np.radians(self.end_angle.get())
         
-        mission_str = f"M{start_x:.2f},{start_y:.2f},{start_theta:.2f},{goal_x:.2f},{goal_y:.2f},{goal_theta:.2f};"
-        for p in self.current_path:
-            real_x = p[0] * scale_factor
-            real_y = (GRID_H - 1 - p[1]) * scale_factor
-            mission_str += f"{real_x:.2f},{real_y:.2f};"
+        # ✅ AJOUT DU NOMBRE DE WP POUR LA SÉCURITÉ RADIO
+        nwp = len(self.current_path)
+        mission_str = f"M{nwp},{start_x:g},{start_y:g},{start_theta:.2f},{goal_x:g},{goal_y:g},{goal_theta:.2f};"
+        
+        for i in range(len(self.current_path)):
+            wp = self.current_path[i]
+            real_x = wp[0] * scale_factor
+            real_y = (GRID_H - 1 - wp[1]) * scale_factor
+            mission_str += f"{real_x:g},{real_y:g};"
+            
+        mission_str += "*" # Sécurité fin de trame
         self.show_export_dialog(mission_str)
 
     def show_export_dialog(self, mission_str):
