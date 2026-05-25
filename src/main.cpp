@@ -484,7 +484,7 @@ void updateNavigationTask(float dt) {
 
     const float TILT_THRESHOLD_START = 6.0;  // À partir de 6° d'inclinaison, on commence à freiner
     const float TILT_THRESHOLD_MAX = 22.0;   // À 22° d'inclinaison, on est au ralentissement maximum
-    const float MIN_SPEED_FACTOR = 0.1;     // Vitesse plancher (35%) pour garder du couple sans caler
+    const float MIN_SPEED_FACTOR = 0.15;     // Vitesse plancher (35%) pour garder du couple sans caler
 
     if (tilt > TILT_THRESHOLD_START) {
         // Calcul d'une rampe linéaire entre les deux seuils d'inclinaison
